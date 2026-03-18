@@ -26,9 +26,9 @@ def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time
     if meas_types is None:
         meas_types = [2] * n_segments
     if meas_start is None:
-        meas_start = [0.0] * n_segments
+        meas_start = [0] * n_segments
     if meas_stop is None:
-        meas_stop = list(time_values)
+        meas_stop = [1] * n_segments
 
     start_v_str = ", ".join(map(str, start_voltages))
     stop_v_str = ", ".join(map(str, stop_voltages))
