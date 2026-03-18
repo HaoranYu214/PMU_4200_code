@@ -21,7 +21,7 @@ params = dict(
     Irange2=1e-4,
 )
 
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\11-02-2026")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 fname_base = SAVE_DIR / f"PUND_{int(params['rise_time'] * 1e6)}us_{params['Vp']}V"
 

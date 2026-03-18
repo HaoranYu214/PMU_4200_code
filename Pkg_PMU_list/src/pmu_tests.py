@@ -19,6 +19,22 @@ def power_off_outputs(Q, channels):
 
 # === segARB 核心配置 ===
 
+def _apply_common_pmu_options(Q, channels, options=None):
+    """Apply optional PMU setup shared by pulse and segARB tests."""
+    if not options:
+        return
+    if options.get("ENABLE_CONNECTION_COMP", False):
+        for ch in channels:
+            Q(f":PMU:CONNECTION:COMP {ch}, 1, 1")
+    if options.get("ENABLE_LOAD_CONFIG", False):
+        resistance = options.get("LOAD_RESISTANCE", 1e6)
+        for ch in channels:
+            Q(f":PMU:LOAD {ch}, {resistance}")
+    if options.get("ENABLE_LLEC", False):
+        for ch in channels:
+            Q(f":PMU:LLEC:CONFIGURE {ch}, 1")
+
+
 def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time_values, 
                               meas_types=None, meas_start=None, meas_stop=None):
     """通用segARB序列配置函数"""
@@ -28,7 +44,7 @@ def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time
     if meas_start is None:
         meas_start = [0] * n_segments
     if meas_stop is None:
-        meas_stop = [1] * n_segments
+        meas_stop = list(time_values)
 
     start_v_str = ", ".join(map(str, start_voltages))
     stop_v_str = ", ".join(map(str, stop_voltages))
@@ -82,7 +98,7 @@ def auto_align_channels(seq_configs):
     return seq_configs
 
 
-def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=None):
+def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=None, options=None):
     """
     通用segARB测试执行函数
     Args:
@@ -100,6 +116,8 @@ def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=
     # 配置RPM,链接RPM到PMU通道
     for ch in channels:
         Q(f":PMU:RPM:CONFIGURE PMU1-{ch}, 0")
+
+    _apply_common_pmu_options(Q, channels, options=options)
 
     # ⚡ 设置测量范围 (必须在 :PMU:INIT 之后设置)
     # 语法: :PMU:MEASURE:RANGE ch, IRangeType, IMeasRange
@@ -186,16 +204,7 @@ def dual_channel_pulse_train(Q, CH1, CH2, p, mode='D'):
     Q(f":PMU:RPM:CONFIGURE PMU1-{CH1}, 0")
     Q(f":PMU:RPM:CONFIGURE PMU1-{CH2}, 0")
 
-    if p.get("ENABLE_CONNECTION_COMP", False):
-        Q(f":PMU:CONNECTION:COMP {CH1}, 1, 1")
-        Q(f":PMU:CONNECTION:COMP {CH2}, 1, 1")
-    if p.get("ENABLE_LOAD_CONFIG", False):
-        R = p.get("LOAD_RESISTANCE", 1e6)
-        Q(f":PMU:LOAD {CH1}, {R}")
-        Q(f":PMU:LOAD {CH2}, {R}")
-    if p.get("ENABLE_LLEC", False):
-        Q(f":PMU:LLEC:CONFIGURE {CH1}, 1")
-        Q(f":PMU:LLEC:CONFIGURE {CH2}, 1")
+    _apply_common_pmu_options(Q, (CH1, CH2), options=p)
 
     Q(f":PMU:MEASURE:RANGE {CH1}, 2, {p['CH1_RANGE']}")
     Q(f":PMU:PULSE:TRAIN {CH1}, {p['CH1_BASE']}, {p['CH1_AMPLITUDE']}")
@@ -235,15 +244,7 @@ def dual_channel_sweep_train(Q, CH1, CH2, p, mode='D'):
     Q(f":PMU:RPM:CONFIGURE PMU1-{CH1}, 0")
     Q(f":PMU:RPM:CONFIGURE PMU1-{CH2}, 0")
 
-    if p.get("ENABLE_CONNECTION_COMP", False):
-        Q(f":PMU:CONNECTION:COMP {CH1}, 1, 1")
-        Q(f":PMU:CONNECTION:COMP {CH2}, 1, 1")
-    if p.get("ENABLE_LOAD_CONFIG", False):
-        R = p.get("LOAD_RESISTANCE", 1e6)
-        Q(f":PMU:LOAD {CH1}, {R}")
-        Q(f":PMU:LOAD {CH2}, {R}")
-    if p.get("ENABLE_LLEC", False):
-        Q(f":PMU:LLEC:CONFIGURE 2, 1")
+    _apply_common_pmu_options(Q, (CH1, CH2), options=p)
 
     Q(f":PMU:MEASURE:MODE {mode_num}")
     Q(f":PMU:MEASURE:RANGE {CH2}, 2, {p['CH2_RANGE']}")
@@ -321,7 +322,7 @@ def hy_pund_segARB(Q, CH1, CH2, params):
     meas_types = [2] * 22
 
     ch1_config = (1, start_voltages, stop_voltages, time_values, meas_types)
-    ch2_config = (1, [0.0]*22, [0.0]*22, time_values, meas_types)
+    ch2_config = (1, [0]*22, [0]*22, time_values, meas_types)
     seq_configs = {CH1: [ch1_config], CH2: [ch2_config]}
     execute_segARB_test(Q, [CH1, CH2], seq_configs, current_ranges=current_ranges)
 

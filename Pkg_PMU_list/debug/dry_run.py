@@ -3,8 +3,8 @@ r"""Generic dry-run runner for PMU test scripts.
 
 Usage:
     python Pkg_PMU_list\debug\dry_run.py
-    python Pkg_PMU_list\debug\dry_run.py Pkg_PMU_list\1C_segARB_seq_list_manual.py
-    python Pkg_PMU_list\debug\dry_run.py --no-save Pkg_PMU_list\1C_segARB_seq_list_manual.py
+    python Pkg_PMU_list\debug\dry_run.py Pkg_PMU_list\1C_ftj_test.py
+    python Pkg_PMU_list\debug\dry_run.py --no-save Pkg_PMU_list\1C_ftj_test.py
 
 The target script is executed, but instrument communication is intercepted and
 printed instead of sent to the real PMU.
@@ -20,7 +20,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SCRIPT = ROOT / "1C_segARB_seq_list_manual.py"
+DEFAULT_SCRIPT = ROOT / "1C_ftj_test.py"
 
 # Edit this path when you want to click "Run" on dry_run.py from the IDE.
 TARGET_SCRIPT = DEFAULT_SCRIPT
@@ -133,6 +133,7 @@ def install_dry_run_hooks(no_save=False):
     import src.instrcomms as instrcomms
     import src.session as session
     import matplotlib.figure as mpl_figure
+    import pandas as pd
 
     state = DryRunState()
 
@@ -177,6 +178,17 @@ def install_dry_run_hooks(no_save=False):
     data_processing.read_both_channels = fake_read_both_channels
 
     if no_save:
+        class DummyExcelWriter:
+            def __init__(self, path, *args, **kwargs):
+                self.path = path
+
+            def __enter__(self):
+                print(f"# SKIP_SAVE ExcelWriter -> {self.path}")
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
         def fake_save_channels_separate_excel(dfs, path):
             print(f"# SKIP_SAVE save_channels_separate_excel -> {path}")
             return True
@@ -203,7 +215,7 @@ def install_dry_run_hooks(no_save=False):
         data_processing.save_excel = fake_save_excel
         mpl_figure.Figure.savefig = fake_fig_save
 
-        import pandas as pd
+        pd.ExcelWriter = DummyExcelWriter
         pd.DataFrame.to_excel = fake_df_to_excel
         pd.DataFrame.to_csv = fake_df_to_csv
 
@@ -254,6 +266,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-
-# dry_run_script("Pkg_PMU_list/1C_segARB_seq_list_manual.py", no_save=True)
+    
 dry_run_script("Pkg_PMU_list/1C_two_stage_delay_read.py", no_save=True)
