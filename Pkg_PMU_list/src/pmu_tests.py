@@ -13,7 +13,7 @@ def power_off_outputs(Q, channels):
     for ch in channels:
         try:
             Q(f":PMU:OUTPUT:STATE {ch}, 0")
-        except:
+        except Exception:
             pass
 
 

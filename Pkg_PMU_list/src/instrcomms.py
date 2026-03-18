@@ -48,7 +48,7 @@ class Communications:
             None
         """
         try:
-            if instrument_resource_string != None:
+            if instrument_resource_string is not None:
                 self._instrument_resource_string = instrument_resource_string
                 
             self._instrument_object = self._resource_manager.open_resource(
@@ -129,9 +129,9 @@ class Communications:
                 self._instrument_object.flow_control = pyconst.ControlFlow.none
             elif flowcontrol == 1:
                 self._instrument_object.flow_control = pyconst.ControlFlow.xon_xoff
-            elif flowcontrol == 1:
+            elif flowcontrol == 2:
                 self._instrument_object.flow_control = pyconst.ControlFlow.rts_cts
-            elif flowcontrol == 1:
+            elif flowcontrol == 3:
                 self._instrument_object.flow_control = pyconst.ControlFlow.dtr_dsr
 
             self._instrument_object.write_termination = writetermination
@@ -152,7 +152,9 @@ class Communications:
             None
         """
         try:
-            self._instrument_object.close()
+            if self._instrument_object is not None:
+                self._instrument_object.close()
+                self._instrument_object = None
         except visa.VisaIOError as visaerr:
             print(f"{visaerr}")
         return
@@ -169,6 +171,8 @@ class Communications:
             None
         """
         try:
+            if self._instrument_object is None:
+                raise RuntimeError("No instrument connection is open.")
             if self._echo_cmds is True:
                 print(command)
             self._instrument_object.write(command)
@@ -187,6 +191,8 @@ class Communications:
             (str): The requested information returned from the target
             instrument.
         """
+        if self._instrument_object is None:
+            raise RuntimeError("No instrument connection is open.")
         return self._instrument_object.read()
 
     def query(self, command: str):
@@ -205,6 +211,8 @@ class Communications:
         """
         response = ""
         try:
+            if self._instrument_object is None:
+                raise RuntimeError("No instrument connection is open.")
             if self._echo_cmds is True:
                 print(command)
             response = self._instrument_object.query(command).rstrip()
