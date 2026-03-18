@@ -4,11 +4,6 @@ PMU核心测试模块 - segARB配置、执行、设备控制
 """
 
 import time
-import pandas as pd
-from .data_processing import (
-    read_both_channels, merge_channels, add_resistance_columns,
-    calculate_polarization, analyze_pund_diff, analyze_nis_switch
-)
 
 
 # === 设备控制 ===
@@ -165,107 +160,6 @@ def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=
             print(f"⚠️ 查询状态出错: {e}")
         time.sleep(0.3)
 
-
-# === 高层封装：运行 + 读取 + 关输出 ===
-
-def run_pulse_train_and_read(Q, ch1, ch2, params, mode='D'):
-    """脉冲训练：执行→读取→关输出→返回"""
-    dual_channel_pulse_train(Q, ch1, ch2, params, mode=mode)
-    df1, df2 = read_both_channels(Q, ch1, ch2)
-    power_off_outputs(Q, (ch1, ch2))
-    if df1 is None or df2 is None or df1.empty or df2.empty:
-        raise ValueError("脉冲训练读取数据为空")
-    dfs = {1: df1, 2: df2}
-    merged = add_resistance_columns(merge_channels(dfs),
-                                    eps=params.get('CURRENT_EPS', 1e-12),
-                                    res_min=params.get('RES_MIN', 1.0),
-                                    res_max=params.get('RES_MAX', 1e15))
-    return {'dfs': dfs, 'merged': merged}
-
-
-def run_sweep_train_and_read(Q, ch1, ch2, params, mode='D'):
-    """扫描+训练：执行→读取→关输出→返回"""
-    dual_channel_sweep_train(Q, ch1, ch2, params, mode=mode)
-    df1, df2 = read_both_channels(Q, ch1, ch2)
-    power_off_outputs(Q, (ch1, ch2))
-    if df1 is None or df2 is None or df1.empty or df2.empty:
-        raise ValueError("扫描测试读取数据为空")
-    dfs = {1: df1, 2: df2}
-    merged = add_resistance_columns(merge_channels(dfs),
-                                    eps=params.get('CURRENT_EPS', 1e-12),
-                                    res_min=params.get('RES_MIN', 1.0),
-                                    res_max=params.get('RES_MAX', 1e15))
-    return {'dfs': dfs, 'merged': merged}
-
-
-def run_cycle_and_read(Q, ch1, ch2, params, n_cycles=1):
-    """Endurance 循环：执行 n 次循环→关输出→返回（不测量）"""
-    current_ranges = {ch1: params['Irange1'], ch2: params['Irange2']}
-    rst_c = params['rise_time_cycle']
-    Vc = params['Vc']
-    offset_c = params.get('offset_c', 0)
-    
-    start_v = [offset_c, -Vc+offset_c, offset_c, Vc+offset_c]
-    stop_v  = [-Vc+offset_c, offset_c, Vc+offset_c, offset_c]
-    time_v  = [rst_c, rst_c, rst_c, rst_c]
-    meas_types = [0, 0, 0, 0]
-    
-    ch1_config = (1, start_v, stop_v, time_v, meas_types, [0.0]*4, [1]*4)
-    ch2_config = (1, [0.0]*4, [0.0]*4, time_v, meas_types, [0.0]*4, [1]*4)
-    
-    seq_configs = {ch1: [ch1_config], ch2: [ch2_config]}
-    seq_list = {ch1: [(1, n_cycles)], ch2: [(1, n_cycles)]}
-    
-    execute_segARB_test(Q, [ch1, ch2], seq_configs, seq_list=seq_list, current_ranges=current_ranges)
-    power_off_outputs(Q, (ch1, ch2))
-    return {'success': True, 'message': f'Cycle completed {n_cycles} times (no data)'}
-
-
-def run_pv2_and_read(Q, ch1, ch2, params):
-    """PV2：执行→读取→关输出→极化计算→返回"""
-    hy_pv2_segARB(Q, ch1, ch2, params)
-    df1, df2 = read_both_channels(Q, ch1, ch2)
-    power_off_outputs(Q, (ch1, ch2))
-    if df1 is None or df1.empty:
-        raise ValueError("PV2读取数据为空")
-    P = calculate_polarization(
-        df1[f'Current {ch1}'].values,
-        df1[f'Timestamp {ch1}'].values,
-        params.get('area_cm2', 1.0)
-    )
-    df_pv2 = pd.DataFrame({
-        'Time': df1[f'Timestamp {ch1}'].values,
-        'Voltage': df1[f'Voltage {ch1}'].values,
-        'Current': df1[f'Current {ch1}'].values,
-        'Polarization': P
-    })
-    return {'df_ch1': df1, 'df_ch2': df2, 'df_pv2': df_pv2}
-
-
-def run_pund_and_read(Q, ch1, ch2, params):
-    """PUND：执行→读取→关输出→差分分析→返回"""
-    hy_pund_segARB(Q, ch1, ch2, params)
-    df1, df2 = read_both_channels(Q, ch1, ch2)
-    power_off_outputs(Q, (ch1, ch2))
-    if df1 is None or df2 is None or df1.empty or df2.empty:
-        raise ValueError("PUND读取数据为空")
-    result = analyze_pund_diff(df1, df2, params)
-    result['df_ch1'] = df1
-    result['df_ch2'] = df2
-    return result
-
-
-def run_NISswitch_and_read(Q, ch1, ch2, params):
-    """NIS Switch：执行→读取→关输出→差分分析→返回"""
-    hy_NISswitch_segARB(Q, ch1, ch2, params)
-    df1, df2 = read_both_channels(Q, ch1, ch2)
-    power_off_outputs(Q, (ch1, ch2))
-    if df1 is None or df2 is None or df1.empty or df2.empty:
-        raise ValueError("NIS Switch读取数据为空")
-    result = analyze_nis_switch(df1, df2, params)
-    result['df_ch1'] = df1
-    result['df_ch2'] = df2
-    return result
 
 # === 底层测试函数 ===
 
