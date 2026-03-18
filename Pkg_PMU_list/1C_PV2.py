@@ -2,10 +2,11 @@
 """
 PV2 测试（精简版）：仅真机 + 封装调用
 """
-from src.data_processing import save_channels_separate_excel
-from src.pmu_tests import run_pv2_and_read
+from src.data_processing import save_channels_separate_excel, read_both_channels, calculate_polarization
+from src.pmu_tests import hy_pv2_segARB, power_off_outputs
 from src.instrcomms import Communications
 import matplotlib.pyplot as plt
+import pandas as pd
 from pathlib import Path
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
@@ -32,13 +33,28 @@ Q = k.query
 
 try:
     print("▶️ 运行 PV2 ...")
-    data = run_pv2_and_read(Q, CH1, CH2, params)
-    save_channels_separate_excel({1: data['df_ch1'], 2: data['df_ch2']}, f"{fname_base}_raw.xlsx")
-    data['df_pv2'].to_excel(f"{fname_base}_pv2.xlsx", index=False)
+    hy_pv2_segARB(Q, CH1, CH2, params)
+    df_ch1, df_ch2 = read_both_channels(Q, CH1, CH2)
+    power_off_outputs(Q, (CH1, CH2))
+    if df_ch1 is None or df_ch1.empty:
+        raise ValueError("PV2读取数据为空")
+    P = calculate_polarization(
+        df_ch1[f'Current {CH1}'].values,
+        df_ch1[f'Timestamp {CH1}'].values,
+        params.get('area_cm2', 1.0)
+    )
+    df_pv2 = pd.DataFrame({
+        'Time': df_ch1[f'Timestamp {CH1}'].values,
+        'Voltage': df_ch1[f'Voltage {CH1}'].values,
+        'Current': df_ch1[f'Current {CH1}'].values,
+        'Polarization': P
+    })
+    save_channels_separate_excel({1: df_ch1, 2: df_ch2}, f"{fname_base}_raw.xlsx")
+    df_pv2.to_excel(f"{fname_base}_pv2.xlsx", index=False)
 
     # 简单PV绘图
     fig, ax = plt.subplots(figsize=(6,5))
-    ax.plot(data['df_pv2']['Voltage'], data['df_pv2']['Polarization'], 'b-')
+    ax.plot(df_pv2['Voltage'], df_pv2['Polarization'], 'b-')
     ax.set_xlabel("Voltage (V)")
     ax.set_ylabel("Polarization (μC/cm²)")
     ax.set_title("PV2 Loop")

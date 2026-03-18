@@ -5,10 +5,12 @@ Endurance 疲劳测试（精简版）
 每次循环独立保存数据，避免数据点超限
 """
 from src.data_processing import save_channels_separate_excel
-from src.pmu_tests import run_cycle_and_read, run_pv2_and_read, run_pund_and_read
+from src.pmu_tests import hy_pv2_segARB, hy_pund_segARB, execute_segARB_test, power_off_outputs
+from src.data_processing import read_both_channels, calculate_polarization, analyze_pund_diff
 from src.instrcomms import Communications
 from pathlib import Path
 import matplotlib.pyplot as plt
+import pandas as pd
 
 # ==================== 配置区 ====================
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
@@ -67,25 +69,52 @@ try:
         try:
             # 1. 执行 n 次循环（不测量）
             print(f"🔁 执行 {int(n_cycles)} 次循环...")
-            run_cycle_and_read(Q, CH1, CH2, params_cycle, n_cycles=int(n_cycles))
+            current_ranges = {CH1: params_cycle['Irange1'], CH2: params_cycle['Irange2']}
+            rst_c = params_cycle['rise_time_cycle']
+            Vc = params_cycle['Vc']
+            offset_c = params_cycle.get('offset_c', 0)
+            start_v = [offset_c, -Vc+offset_c, offset_c, Vc+offset_c]
+            stop_v  = [-Vc+offset_c, offset_c, Vc+offset_c, offset_c]
+            time_v  = [rst_c, rst_c, rst_c, rst_c]
+            meas_types = [0, 0, 0, 0]
+            ch1_config = (1, start_v, stop_v, time_v, meas_types, [0.0]*4, [1]*4)
+            ch2_config = (1, [0.0]*4, [0.0]*4, time_v, meas_types, [0.0]*4, [1]*4)
+            seq_configs = {CH1: [ch1_config], CH2: [ch2_config]}
+            seq_list = {CH1: [(1, int(n_cycles))], CH2: [(1, int(n_cycles))]}
+            execute_segARB_test(Q, [CH1, CH2], seq_configs, seq_list=seq_list, current_ranges=current_ranges)
+            power_off_outputs(Q, (CH1, CH2))
             print(f"   ✅ {int(n_cycles)} 次循环完成")
             
             # 2. PV2 读取
             print(f"📊 执行 PV2 读取...")
-            pv2_data = run_pv2_and_read(Q, CH1, CH2, params_pv2)
+            hy_pv2_segARB(Q, CH1, CH2, params_pv2)
+            pv2_ch1, pv2_ch2 = read_both_channels(Q, CH1, CH2)
+            power_off_outputs(Q, (CH1, CH2))
+            if pv2_ch1 is None or pv2_ch1.empty:
+                raise ValueError("PV2读取数据为空")
+            pv2_p = calculate_polarization(
+                pv2_ch1[f'Current {CH1}'].values,
+                pv2_ch1[f'Timestamp {CH1}'].values,
+                params_pv2.get('area_cm2', 1.0)
+            )
+            pv2_df = pd.DataFrame({
+                'Time': pv2_ch1[f'Timestamp {CH1}'].values,
+                'Voltage': pv2_ch1[f'Voltage {CH1}'].values,
+                'Current': pv2_ch1[f'Current {CH1}'].values,
+                'Polarization': pv2_p
+            })
             
             # 保存 PV2 数据
             fname_pv2 = SAVE_DIR / f"Endurance_PV2_after_{int(n_cycles)}cycles"
             save_channels_separate_excel(
-                {1: pv2_data['df_ch1'], 2: pv2_data['df_ch2']},
+                {1: pv2_ch1, 2: pv2_ch2},
                 f"{fname_pv2}_raw.xlsx"
             )
-            pv2_data['df_pv2'].to_excel(f"{fname_pv2}_analysis.xlsx", index=False)
+            pv2_df.to_excel(f"{fname_pv2}_analysis.xlsx", index=False)
             
             # 简单 PV2 绘图
             fig, ax = plt.subplots(figsize=(6, 5))
-            ax.plot(pv2_data['df_pv2']['Voltage'], 
-                   pv2_data['df_pv2']['Polarization'], 'b-')
+            ax.plot(pv2_df['Voltage'], pv2_df['Polarization'], 'b-')
             ax.set_xlabel("Voltage (V)")
             ax.set_ylabel("Polarization (μC/cm²)")
             ax.set_title(f"PV2 after {int(n_cycles)} cycles")
@@ -96,8 +125,12 @@ try:
             
             # 3. PUND 读取
             print(f"📊 执行 PUND 读取...")
-            pund_result = run_pund_and_read(Q, CH1, CH2, params_pund)
-            df_ch1, df_ch2 = pund_result['df_ch1'], pund_result['df_ch2']
+            hy_pund_segARB(Q, CH1, CH2, params_pund)
+            df_ch1, df_ch2 = read_both_channels(Q, CH1, CH2)
+            power_off_outputs(Q, (CH1, CH2))
+            if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
+                raise ValueError("PUND读取数据为空")
+            pund_result = analyze_pund_diff(df_ch1, df_ch2, params_pund)
             
             # 保存 PUND 数据
             fname_pund = SAVE_DIR / f"Endurance_PUND_after_{int(n_cycles)}cycles"

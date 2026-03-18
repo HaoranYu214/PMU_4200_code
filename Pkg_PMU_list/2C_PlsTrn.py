@@ -2,14 +2,13 @@
 """
 双通道 4225-PMU 脉冲训练测试（精简版）
 - 仅真机路径
-- 测试+读取+关输出 由 data_utils.run_pulse_train_and_read 负责
-- 本脚本只做调用与绘图
+- 扁平流程：测试 -> 读取 -> 关输出 -> 分析 -> 绘图
 """
 
 # 导入自定义模块
 from src.plotting_utils import PlotManager, plot_time_series
-from src.data_processing import save_channels_separate_excel
-from src.pmu_tests import run_pulse_train_and_read
+from src.data_processing import save_channels_separate_excel, read_both_channels, merge_channels, add_resistance_columns
+from src.pmu_tests import dual_channel_pulse_train, power_off_outputs
 from src.instrcomms import Communications
 from pathlib import Path
 
@@ -78,9 +77,18 @@ Q = k.query
 
 try:
     print("▶️ 运行脉冲训练...")
-    result = run_pulse_train_and_read(Q, CH1, CH2, params, mode=TEST_MODE)
-    dfs = result['dfs']
-    merged = result['merged']
+    dual_channel_pulse_train(Q, CH1, CH2, params, mode=TEST_MODE)
+    df1, df2 = read_both_channels(Q, CH1, CH2)
+    power_off_outputs(Q, (CH1, CH2))
+    if df1 is None or df2 is None or df1.empty or df2.empty:
+        raise ValueError("脉冲训练读取数据为空")
+    dfs = {1: df1, 2: df2}
+    merged = add_resistance_columns(
+        merge_channels(dfs),
+        eps=params.get('CURRENT_EPS', 1e-12),
+        res_min=params.get('RES_MIN', 1.0),
+        res_max=params.get('RES_MAX', 1e15)
+    )
     # 保存分通道
     SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\FTJ\Refined")
     SAVE_DIR.mkdir(parents=True, exist_ok=True)

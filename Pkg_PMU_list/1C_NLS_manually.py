@@ -3,7 +3,8 @@
 NIS Switch 测试：铁电隧穿结电阻切换测量
 """
 from src.data_processing import save_channels_separate_excel, calculate_polarization
-from src.pmu_tests import run_NISswitch_and_read
+from src.pmu_tests import hy_NISswitch_segARB, power_off_outputs
+from src.data_processing import read_both_channels
 from src.instrcomms import Communications
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -41,9 +42,11 @@ Q = k.query
 
 try:
     print("▶️ 运行 NIS Switch ...")
-    data = run_NISswitch_and_read(Q, CH1, CH2, params)
-    df_ch1 = data['df_ch1']
-    df_ch2 = data['df_ch2']
+    hy_NISswitch_segARB(Q, CH1, CH2, params)
+    df_ch1, df_ch2 = read_both_channels(Q, CH1, CH2)
+    power_off_outputs(Q, (CH1, CH2))
+    if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
+        raise ValueError("NIS Switch读取数据为空")
     
     # 保存原始数据
     save_channels_separate_excel({1: df_ch1, 2: df_ch2}, f"{fname_base}_raw.xlsx")

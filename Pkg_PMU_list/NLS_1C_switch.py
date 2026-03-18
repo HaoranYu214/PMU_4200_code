@@ -3,7 +3,8 @@
 NLS Switch 测试 - 封装版
 """
 from src.data_processing import save_channels_separate_excel, calculate_polarization
-from src.pmu_tests import run_NISswitch_and_read
+from src.pmu_tests import hy_NISswitch_segARB, power_off_outputs
+from src.data_processing import read_both_channels
 from src.instrcomms import Communications
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,9 +35,11 @@ def run_nls_switch_test(Q, CH1, CH2, params, save_dir, fname_prefix=None):
     fname_base = save_dir / fname_prefix
     
     print(f"▶️ 运行 NLS Switch (Vp={params['Vp']}V, Vsquare={params['Vsquare']:.2f}V, Dwell={params['Dwell']:.1e}s)...")
-    data = run_NISswitch_and_read(Q, CH1, CH2, params)
-    df_ch1 = data['df_ch1']
-    df_ch2 = data['df_ch2']
+    hy_NISswitch_segARB(Q, CH1, CH2, params)
+    df_ch1, df_ch2 = read_both_channels(Q, CH1, CH2)
+    power_off_outputs(Q, (CH1, CH2))
+    if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
+        raise ValueError("NIS Switch读取数据为空")
     
     result = {'df_ch1': df_ch1, 'df_ch2': df_ch2, 'success': True}
     
