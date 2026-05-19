@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
-"""FTJ segARB script with direct seq_configs and shared time arrays."""
+"""FTJ RV script with one prepost sequence and one full write+read scan sequence."""
 
 from datetime import datetime
 from pathlib import Path
+import sys
 
 import pandas as pd
 
-from src.data_processing import read_both_channels
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
+
 from debug.waveform_preview import preview_sequence_configs
+from src.data_processing import read_both_channels
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
 
@@ -15,7 +20,7 @@ INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\Test")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
-FILE_STEM = "ftj_test"
+FILE_STEM = "ftj_rv"
 
 CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
@@ -25,47 +30,89 @@ SEGARB_OPTIONS = {
     "ENABLE_LLEC": True,
 }
 
-
+OFFSET_V = 0.0
+WRITE_V_MAX = 2.0
+WRITE_V_STEP = 0.1
 READ_V = 0.1
-POS_V_START = 0.5
-POS_V_STOP = 2.0
-POS_STEPS = 10
-NEG_V_START = -0.5
-NEG_V_STOP = -2.0
-NEG_STEPS = 10
+PREPOST_V = -WRITE_V_MAX
 
+PREPOST_DWELL = 1e-6
 WRITE_DWELL = 1e-6
 READ_DWELL = 1e-5
 
-POS_SEQ_ID = 1
-NEG_SEQ_ID = 2
+PREPOST_IDLE_1 = 1e-3
+PREPOST_RISE = 2e-7
+PREPOST_FALL = 2e-7
+PREPOST_IDLE_2 = 1e-3
+
+WRITE_IDLE_1 = 1e-3
+WRITE_RISE = 2e-7
+WRITE_FALL = 2e-7
+WRITE_IDLE_2 = 1e-3
+
+READ_IDLE_1 = 1e-3
+READ_RISE = 2e-7
+READ_FALL = 2e-7
+READ_IDLE_2 = 1e-3
+
+PREPOST_SEQ_ID = 1
+SCAN_SEQ_ID = 2
 MAX_SEGMENTS_PER_SEQ = 10000
 
+PREVIEW_ONLY = False
 
-# Shared clock definition for each sequence.
-time_values_write = [1e-3, 2e-7, WRITE_DWELL, 2e-7, 1e-3]
-time_values_read = [1e-3, 2e-7, READ_DWELL, 2e-7, 1e-3]
+time_values_prepost = [PREPOST_IDLE_1, PREPOST_RISE, PREPOST_DWELL, PREPOST_FALL, PREPOST_IDLE_2]
+time_values_write = [WRITE_IDLE_1, WRITE_RISE, WRITE_DWELL, WRITE_FALL, WRITE_IDLE_2]
+time_values_read = [READ_IDLE_1, READ_RISE, READ_DWELL, READ_FALL, READ_IDLE_2]
 
-# Measurement start/stop are times inside each segment window.
-meas_types_write = [0, 0, 1, 0, 0]
-meas_start_write = [0.0, 0.0, 0.0, 0.0, 0.0]
+meas_types_prepost = [0, 0, 0, 0, 0]
+meas_start_prepost = [0.0] * len(time_values_prepost)
+meas_stop_prepost = time_values_prepost
+
+meas_types_write = [0, 0, 0, 0, 0]
+meas_start_write = [0.0] * len(time_values_write)
 meas_stop_write = time_values_write
 
 meas_types_read = [0, 0, 1, 0, 0]
-meas_start_read = [x * 0.5 for x in time_values_read]
-meas_stop_read = [x * 0.9 for x in time_values_read]
+meas_start_read = [0.0, 0.0, READ_DWELL * 0.5, 0.0, 0.0]
+meas_stop_read = [time_values_read[0], time_values_read[1], READ_DWELL * 0.9, time_values_read[3], time_values_read[4]]
 
 
-def voltage_steps(start, stop, steps):
-    """Return inclusive voltage steps from start to stop."""
-    if steps <= 1:
-        return [stop]
-    step = (stop - start) / (steps - 1)
-    return [start + i * step for i in range(steps)]
+def build_pulse_block(amplitude, time_values):
+    """Return a 5-segment offset -> amplitude -> offset pulse block."""
+    start_v = [OFFSET_V, OFFSET_V, amplitude, amplitude, OFFSET_V]
+    stop_v = [OFFSET_V, amplitude, amplitude, OFFSET_V, OFFSET_V]
+    return start_v, stop_v, list(time_values)
 
 
-def make_ispp_sequence(seq_id, voltages):
-    """Build one sequence containing write+read blocks for a voltage ladder."""
+def voltage_sweep_path(vmax, step):
+    """Return offset -> +Vmax -> offset -> -Vmax -> offset scan amplitudes."""
+    n_steps = max(1, int(round(vmax / step)))
+    positive = [round(step * i, 10) for i in range(1, n_steps + 1)]
+    back_to_zero = [round(step * i, 10) for i in range(n_steps - 1, -1, -1)]
+    negative = [round(-step * i, 10) for i in range(1, n_steps + 1)]
+    back_from_negative = [round(-step * i, 10) for i in range(n_steps - 1, -1, -1)]
+    return positive + back_to_zero + negative + back_from_negative
+
+
+def make_prepost_sequence():
+    """Build the prepost sequence: one pulse only."""
+    start_v, stop_v, time_values = build_pulse_block(PREPOST_V, time_values_prepost)
+    ch1_config = (PREPOST_SEQ_ID, start_v, stop_v, time_values, meas_types_prepost, meas_start_prepost, meas_stop_prepost)
+    ch2_config = (
+        PREPOST_SEQ_ID,
+        [0.0] * len(time_values),
+        [0.0] * len(time_values),
+        time_values,
+        meas_types_prepost,
+        meas_start_prepost,
+        meas_stop_prepost,
+    )
+    return ch1_config, ch2_config
+
+
+def make_scan_sequence(voltages):
+    """Build one large sequence: write pulse, then small read pulse, for every scan point."""
     ch1_start_v = []
     ch1_stop_v = []
     ch2_start_v = []
@@ -76,60 +123,83 @@ def make_ispp_sequence(seq_id, voltages):
     meas_stop = []
 
     for voltage in voltages:
-        ch1_start_v.extend([0.0, 0.0, voltage, voltage, 0])
-        ch1_stop_v.extend([0.0, voltage, voltage, 0.0, 0])
-        ch2_start_v.extend([0] * 5)
-        ch2_stop_v.extend([0] * 5)
-        time_values.extend(time_values_write)
+        write_start_v, write_stop_v, write_times = build_pulse_block(voltage, time_values_write)
+        ch1_start_v.extend(write_start_v)
+        ch1_stop_v.extend(write_stop_v)
+        ch2_start_v.extend([0.0] * len(write_times))
+        ch2_stop_v.extend([0.0] * len(write_times))
+        time_values.extend(write_times)
         meas_types.extend(meas_types_write)
         meas_start.extend(meas_start_write)
         meas_stop.extend(meas_stop_write)
 
-        ch1_start_v.extend([0.0, 0.0, READ_V, READ_V, 0])
-        ch1_stop_v.extend([0.0, READ_V, READ_V, 0.0, 0])
-        ch2_start_v.extend([0] * 5)
-        ch2_stop_v.extend([0] * 5)
-        time_values.extend(time_values_read)
+        read_start_v, read_stop_v, read_times = build_pulse_block(READ_V, time_values_read)
+        ch1_start_v.extend(read_start_v)
+        ch1_stop_v.extend(read_stop_v)
+        ch2_start_v.extend([0.0] * len(read_times))
+        ch2_stop_v.extend([0.0] * len(read_times))
+        time_values.extend(read_times)
         meas_types.extend(meas_types_read)
         meas_start.extend(meas_start_read)
         meas_stop.extend(meas_stop_read)
 
     if len(time_values) > MAX_SEGMENTS_PER_SEQ:
         raise ValueError(
-            f"ISPP seq {seq_id} has {len(time_values)} segments, "
+            f"RV scan sequence has {len(time_values)} segments, "
             f"above MAX_SEGMENTS_PER_SEQ={MAX_SEGMENTS_PER_SEQ}."
         )
 
-    ch1_config = (seq_id, ch1_start_v, ch1_stop_v, time_values, meas_types, meas_start, meas_stop)
-    ch2_config = (seq_id, ch2_start_v, ch2_stop_v, time_values, meas_types, meas_start, meas_stop)
+    ch1_config = (SCAN_SEQ_ID, ch1_start_v, ch1_stop_v, time_values, meas_types, meas_start, meas_stop)
+    ch2_config = (SCAN_SEQ_ID, ch2_start_v, ch2_stop_v, time_values, meas_types, meas_start, meas_stop)
     return ch1_config, ch2_config
 
 
-POS_VOLTAGES = voltage_steps(POS_V_START, POS_V_STOP, POS_STEPS)
-NEG_VOLTAGES = voltage_steps(NEG_V_START, NEG_V_STOP, NEG_STEPS)
+SCAN_VOLTAGES = voltage_sweep_path(WRITE_V_MAX, WRITE_V_STEP)
 
-ch1_pos_config, ch2_pos_config = make_ispp_sequence(POS_SEQ_ID, POS_VOLTAGES)
-ch1_neg_config, ch2_neg_config = make_ispp_sequence(NEG_SEQ_ID, NEG_VOLTAGES)
+ch1_prepost_config, ch2_prepost_config = make_prepost_sequence()
+ch1_scan_config, ch2_scan_config = make_scan_sequence(SCAN_VOLTAGES)
 
 seq_configs = {
-    CH1: [ch1_pos_config, ch1_neg_config],
-    CH2: [ch2_pos_config, ch2_neg_config],
+    CH1: [ch1_prepost_config, ch1_scan_config],
+    CH2: [ch2_prepost_config, ch2_scan_config],
 }
 
-# Equivalent to :PMU:SARB:WFM:SEQ:LIST.
-# Each tuple is (seq_id, loop_count), so loop_count repeats that seq in hardware.
-SEQ_PLAN = [(POS_SEQ_ID, 1), (NEG_SEQ_ID, 1)]
-
+SEQ_PLAN = [(PREPOST_SEQ_ID, 1), (SCAN_SEQ_ID, 1)]
 SEQ_LIST = {
     CH1: SEQ_PLAN,
     CH2: SEQ_PLAN,
 }
 
 
-preview_sequence_configs
+def preview_waveform(output_path=None):
+    """Preview the generated RV waveform on CH1."""
+    return preview_sequence_configs(
+        [ch1_prepost_config, ch1_scan_config],
+        output_path,
+        title_prefix="FTJ RV CH1",
+    )
+
+
+def build_readback_table(df_ch1, df_ch2):
+    """Return only the readback points, one row per write voltage."""
+    if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
+        raise ValueError("RV run returned empty data.")
+
+    count = min(len(df_ch1), len(df_ch2), len(SCAN_VOLTAGES))
+    rv_df = pd.DataFrame(
+        {
+            "WriteVoltage": SCAN_VOLTAGES[:count],
+            "ReadTimestamp": df_ch1[f"Timestamp {CH1}"].values[:count],
+            "ReadVoltage": df_ch1[f"Voltage {CH1}"].values[:count],
+            "ReadCurrent": df_ch1[f"Current {CH1}"].values[:count],
+        }
+    )
+    rv_df["Resistance"] = rv_df["ReadVoltage"] / rv_df["ReadCurrent"].replace(0, pd.NA)
+    return rv_df
+
 
 def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
-    """Run the FTJ segARB sequence list and optionally save raw data."""
+    """Run the FTJ RV test and optionally save readback-only results."""
     with PMUSession(INST, channels=(CH1, CH2)) as session:
         query = session.query
         execute_segARB_test(
@@ -144,40 +214,42 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
         df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
         power_off_outputs(query, (CH1, CH2))
 
-    if df_ch1 is None and df_ch2 is None:
-        raise ValueError("No data returned from the FTJ segARB run.")
+    rv_df = build_readback_table(df_ch1, df_ch2)
 
     output_path = None
     if save_results:
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = save_dir / f"{file_stem}_{timestamp}_raw.xlsx"
+        output_path = save_dir / f"{file_stem}_{timestamp}_rv.xlsx"
         params_df = pd.DataFrame(
             [
                 {"name": name, "value": repr(value)}
                 for name, value in globals().items()
                 if name.isupper()
-                or name.startswith(("Vibas_", "Dwell_", "time_values_", "meas_", "ch1_", "ch2_", "seq_configs", "SEQ_LIST"))
+                or name.startswith(("time_values_", "meas_", "ch1_", "ch2_", "seq_configs", "SEQ_LIST"))
             ]
         )
 
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            if df_ch1 is not None and not df_ch1.empty:
-                df_ch1.to_excel(writer, sheet_name="Channel_1", index=False)
-            if df_ch2 is not None and not df_ch2.empty:
-                df_ch2.to_excel(writer, sheet_name="Channel_2", index=False)
+            rv_df.to_excel(writer, sheet_name="RV_ReadOnly", index=False)
+            df_ch1.to_excel(writer, sheet_name="Channel_1_ReadOnly", index=False)
+            df_ch2.to_excel(writer, sheet_name="Channel_2_ReadOnly", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
 
     return {
         "df_ch1": df_ch1,
         "df_ch2": df_ch2,
+        "rv_df": rv_df,
         "output_path": output_path,
     }
 
 
 def main():
-    """Run the FTJ segARB sequence list and save raw data."""
+    """Run the FTJ RV sequence and save readback data."""
+    if PREVIEW_ONLY:
+        preview_waveform()
+        return
     run_ftj_test()
 
 

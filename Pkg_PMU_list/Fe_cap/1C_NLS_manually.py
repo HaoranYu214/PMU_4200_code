@@ -2,10 +2,15 @@
 """NLS switch segARB test with direct sequence definitions."""
 
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
 from debug.waveform_preview import preview_sequence_configs
 from src.data_processing import calculate_polarization, read_both_channels
@@ -220,4 +225,3 @@ if __name__ == "__main__":
         preview_waveform()
     else:
         main()
-

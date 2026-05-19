@@ -6,9 +6,14 @@ test1 -> wait -> test2 -> wait -> test3 ...
 """
 
 from pathlib import Path
+import sys
 import time
 
 import pandas as pd
+
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
 from src.data_processing import merge_channels, read_both_channels
 from debug.waveform_preview import preview_sequence_configs

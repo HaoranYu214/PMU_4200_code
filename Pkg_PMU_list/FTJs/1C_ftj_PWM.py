@@ -6,6 +6,11 @@ from pathlib import Path
 
 import pandas as pd
 
+import sys
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
+
 from src.data_processing import read_both_channels
 from debug.waveform_preview import preview_sequence_configs
 from src.pmu_tests import execute_segARB_test, power_off_outputs
@@ -42,12 +47,12 @@ LOG_MAX_COUNT = 100
 
 
 # Shared clock definition for each sequence.
-time_values_seq1 = [1e-3, 2e-7, Dwell_seq1, 2e-7, 0.1]
-time_values_seq2 = [1e-3, 2e-7, Dwell_seq2, 2e-7, 0.1]
-time_values_seq3 = [1e-3, 2e-7, Dwell_seq3, 2e-7, 0.1]
+time_values_seq1 = [1e-3, 2e-7, Dwell_seq1, 2e-7, 1e-3]
+time_values_seq2 = [1e-3, 2e-7, Dwell_seq2, 2e-7, 1e-3]
+time_values_seq3 = [1e-3, 2e-7, Dwell_seq3, 2e-7, 1e-3]
 
 # Measurement start/stop are times inside each segment window.
-meas_types_seq1 = [0, 0, 0, 0, 0]
+meas_types_seq1 = [0, 0, 1, 0, 0]
 meas_start_seq1 = [0.0, 0.0, 0.0, 0.0, 0.0]
 meas_stop_seq1 = time_values_seq1
 
@@ -55,7 +60,7 @@ meas_types_seq2 = [0, 0, 1, 0, 0]
 meas_start_seq2 = [x * 0.5 for x in time_values_seq2]
 meas_stop_seq2  = [x * 0.9 for x in time_values_seq2]
 
-meas_types_seq3 = [0, 0, 0, 0, 0]
+meas_types_seq3 = [0, 0, 1, 0, 0]
 meas_start_seq3 = [0.0, 0.0, 0.0, 0.0, 0.0]
 meas_stop_seq3 = time_values_seq3
 
@@ -132,6 +137,15 @@ SEQ_LIST = {
     CH2: SEQ_PLAN,
 }
 
+def preview_ispp_waveform(output_path=None):
+    """Save a CH1 voltage preview for the generated ISPP sequences."""
+    if output_path is None:
+        output_path = SAVE_DIR / f"{FILE_STEM}_ispp_preview.png"
+    return preview_sequence_configs(
+        [ch1_config_seq1, ch1_config_seq2, ch1_config_seq3],
+        output_path,
+        title_prefix="ISPP CH1",
+    )
 
 
 def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
@@ -182,6 +196,7 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
     }
 
 
+
 def main():
     """Run the FTJ segARB sequence list and save raw data."""
     run_ftj_test()
@@ -189,3 +204,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # preview_ispp_waveform()

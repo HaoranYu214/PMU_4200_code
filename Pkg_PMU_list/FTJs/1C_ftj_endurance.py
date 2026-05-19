@@ -6,6 +6,11 @@ import importlib.util
 from pathlib import Path
 import traceback
 
+import sys
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
+
 import pandas as pd
 
 FTJ_SCRIPT = Path(__file__).with_name("1C_ftj_test.py")

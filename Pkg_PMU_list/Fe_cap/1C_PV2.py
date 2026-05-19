@@ -2,9 +2,14 @@
 """PV2 segARB test with direct sequence definitions."""
 
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import pandas as pd
+
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
 from debug.waveform_preview import preview_sequence_configs
 from src.data_processing import calculate_polarization, read_both_channels, save_channels_separate_excel
@@ -22,8 +27,8 @@ params = dict(
     Irange1=1e-4,
     Irange2=1e-4,
 )
-PREVIEW_ONLY = True
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\Jingtian\2025-12-14\BTO\Device2")
+PREVIEW_ONLY = False
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\Test")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 fname_base = SAVE_DIR / f"PV2_{int(params['rise_time'] * 1e6)}us_{params['Vp']}V"
 

@@ -6,6 +6,11 @@ from pathlib import Path
 
 import pandas as pd
 
+import sys
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
+
 from src.data_processing import read_both_channels
 from debug.waveform_preview import preview_sequence_configs
 from src.pmu_tests import execute_segARB_test, power_off_outputs
@@ -13,7 +18,7 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ endurance")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\Test")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_test"
 
@@ -106,6 +111,15 @@ SEQ_LIST = {
     ),
 }
 
+def preview_waveform(output_path=None):
+    """Save a CH1 voltage preview for the generated ISPP sequences."""
+    if output_path is None:
+        output_path = SAVE_DIR / f"{FILE_STEM}_preview.png"
+    return preview_sequence_configs(
+        [ch1_config_seq1, ch1_config_seq2, ch1_config_seq3],
+        output_path,
+        title_prefix="ISPP CH1",
+    )
 
 
 def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
@@ -162,4 +176,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    preview_waveform()

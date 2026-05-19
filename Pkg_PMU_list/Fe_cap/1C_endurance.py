@@ -2,9 +2,14 @@
 """Endurance test: cycle, PV2 readback, then PUND readback."""
 
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import pandas as pd
+
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
 from debug.waveform_preview import preview_sequence_configs
 from src.data_processing import analyze_pund_diff, calculate_polarization, read_both_channels, save_channels_separate_excel

@@ -2,10 +2,15 @@
 """PUND segARB test with direct sequence definitions."""
 
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
 from debug.waveform_preview import preview_sequence_configs
 from src.data_processing import calculate_polarization, read_both_channels, save_channels_separate_excel
@@ -16,8 +21,8 @@ INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 params = dict(
     rise_time=5e-5,
-    dwell_time=2e-8,
-    delay_time=1e-4,
+    dwell_time=5e-5,
+    delay_time=5e-5,
     Vp=1,
     offset=0,
     area_cm2=1.2567e-5,

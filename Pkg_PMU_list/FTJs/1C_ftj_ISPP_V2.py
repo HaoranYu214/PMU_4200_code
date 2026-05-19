@@ -5,6 +5,10 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import sys
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
 from src.data_processing import read_both_channels
 from src.pmu_tests import execute_segARB_test, power_off_outputs
@@ -190,4 +194,5 @@ def main():
 
 
 if __name__ == "__main__":
+    preview_ispp_waveform()
     main()

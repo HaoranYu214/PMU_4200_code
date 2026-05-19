@@ -35,9 +35,27 @@ def _apply_common_pmu_options(Q, channels, options=None):
             Q(f":PMU:LLEC:CONFIGURE {ch}, 1")
 
 
-def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time_values, 
+SARB_ARRAY_CHUNK = 128
+
+
+def _send_sarb_array(Q, command, ch, seq_id, values, *, formatter=str):
+    """Send a Segment Arb array, appending extra chunks with :ADD commands."""
+    if not values:
+        return
+
+    chunks = [values[index : index + SARB_ARRAY_CHUNK] for index in range(0, len(values), SARB_ARRAY_CHUNK)]
+    first_values = ", ".join(formatter(value) for value in chunks[0])
+    Q(f"{command} {ch}, {seq_id}, {first_values}")
+
+    add_command = f"{command}:ADD"
+    for chunk in chunks[1:]:
+        chunk_values = ", ".join(formatter(value) for value in chunk)
+        Q(f"{add_command} {ch}, {seq_id}, {chunk_values}")
+
+
+def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time_values,
                               meas_types=None, meas_start=None, meas_stop=None):
-    """通用segARB序列配置函数"""
+    """通用segARB序列配置函数，支持长数组自动用 :ADD 续传。"""
     n_segments = len(start_voltages)
     if meas_types is None:
         meas_types = [2] * n_segments
@@ -46,19 +64,12 @@ def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time
     if meas_stop is None:
         meas_stop = list(time_values)
 
-    start_v_str = ", ".join(map(str, start_voltages))
-    stop_v_str = ", ".join(map(str, stop_voltages))
-    time_str = ", ".join([f"{t:.2e}" for t in time_values])
-    meas_type_str = ", ".join(map(str, meas_types))
-    meas_start_str = ", ".join([f"{t:.2e}" for t in meas_start])
-    meas_stop_str = ", ".join([f"{t:.2e}" for t in meas_stop])
-
-    Q(f":PMU:SARB:SEQ:STARTV {ch}, {seq_id}, {start_v_str}")
-    Q(f":PMU:SARB:SEQ:STOPV {ch}, {seq_id}, {stop_v_str}")
-    Q(f":PMU:SARB:SEQ:TIME {ch}, {seq_id}, {time_str}")
-    Q(f":PMU:SARB:SEQ:MEAS:TYPE {ch}, {seq_id}, {meas_type_str}")
-    Q(f":PMU:SARB:SEQ:MEAS:START {ch}, {seq_id}, {meas_start_str}")
-    Q(f":PMU:SARB:SEQ:MEAS:STOP {ch}, {seq_id}, {meas_stop_str}")
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:STARTV", ch, seq_id, start_voltages)
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:STOPV", ch, seq_id, stop_voltages)
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:TIME", ch, seq_id, time_values, formatter=lambda value: f"{value:.2e}")
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:MEAS:TYPE", ch, seq_id, meas_types)
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:MEAS:START", ch, seq_id, meas_start, formatter=lambda value: f"{value:.2e}")
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:MEAS:STOP", ch, seq_id, meas_stop, formatter=lambda value: f"{value:.2e}")
 
 
 def auto_align_channels(seq_configs):

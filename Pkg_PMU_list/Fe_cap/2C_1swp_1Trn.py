@@ -2,6 +2,11 @@
 """Two-channel sweep plus pulse-train test."""
 
 from pathlib import Path
+import sys
+
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
 from src.data_processing import add_resistance_columns, merge_channels, read_both_channels, save_channels_separate_excel
 from src.plotting_utils import PlotManager, plot_time_series
