@@ -7,12 +7,13 @@ from pathlib import Path
 import pandas as pd
 
 from src.data_processing import read_both_channels
+from debug.waveform_preview import preview_sequence_configs
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ endurance")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\Test")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_test"
 
@@ -25,13 +26,19 @@ SEGARB_OPTIONS = {
 }
 
 
-Vibas_seq1 = 5
-Vibas_seq2 = 1
-Vibas_seq3 = -1.8
+Vibas_seq1 = 2
+Vibas_seq2 = 0.1
+Vibas_seq3 = -2
 
 Dwell_seq1 = 1e-6
-Dwell_seq2 = 1e-3
+Dwell_seq2 = 1e-5
 Dwell_seq3 = 1e-6
+
+COUNT_RULE = "linear"  # linear, square, exp, log, custom
+N_READ_POINTS = 10
+CUSTOM_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+EXP_BASE = 2
+LOG_MAX_COUNT = 100
 
 
 # Shared clock definition for each sequence.
@@ -39,7 +46,7 @@ time_values_seq1 = [1e-3, 2e-7, Dwell_seq1, 2e-7, 0.1]
 time_values_seq2 = [1e-3, 2e-7, Dwell_seq2, 2e-7, 0.1]
 time_values_seq3 = [1e-3, 2e-7, Dwell_seq3, 2e-7, 0.1]
 
-# Measurement start/stop are percentages of each segment window, so use values in [0, 1].
+# Measurement start/stop are times inside each segment window.
 meas_types_seq1 = [0, 0, 0, 0, 0]
 meas_start_seq1 = [0.0, 0.0, 0.0, 0.0, 0.0]
 meas_stop_seq1 = time_values_seq1
@@ -51,6 +58,7 @@ meas_stop_seq2  = [x * 0.9 for x in time_values_seq2]
 meas_types_seq3 = [0, 0, 0, 0, 0]
 meas_start_seq3 = [0.0, 0.0, 0.0, 0.0, 0.0]
 meas_stop_seq3 = time_values_seq3
+
 
 # Put voltage arrays in the config area so they are easy to edit.
 ch1_start_v_seq1 = [0.0, 0.0, Vibas_seq1, Vibas_seq1, 0]
@@ -80,29 +88,48 @@ seq_configs = {
     CH2: [ch2_config_seq1, ch2_config_seq2, ch2_config_seq3],
 }
 
+
+def make_counts(rule, n_points):
+    """Return write loop counts for each read point."""
+    if rule == "custom":
+        return CUSTOM_COUNTS
+    if rule == "linear":
+        return list(range(1, n_points + 1))
+    if rule == "square":
+        return [i * i for i in range(1, n_points + 1)]
+    if rule == "exp":
+        return [EXP_BASE ** (i - 1) for i in range(1, n_points + 1)]
+    if rule == "log":
+        if n_points == 1:
+            return [1]
+        return [
+            max(1, round(LOG_MAX_COUNT ** ((i - 1) / (n_points - 1))))
+            for i in range(1, n_points + 1)
+        ]
+    raise ValueError(f"Unknown COUNT_RULE: {rule}")
+
+
+def make_write_read_plan(write_seq, read_seq, counts):
+    """Build [(write_seq, count), (read_seq, 1), ...]."""
+    plan = []
+    for count in counts:
+        plan.append((write_seq, int(count)))
+        plan.append((read_seq, 1))
+    return plan
+
+
+WRITE_COUNTS = make_counts(COUNT_RULE, N_READ_POINTS)
+
 # Equivalent to :PMU:SARB:WFM:SEQ:LIST.
-# SEQ_LIST = {
-#     CH1: (
-#         [(3, 1), (2, 1)] * 100
-#     ),
-#     CH2: (
-#         [(3, 1), (2, 1)] * 100
-#     ),
-# }
+# Each tuple is (seq_id, loop_count), so loop_count repeats that seq in hardware.
+SEQ_PLAN = (
+    make_write_read_plan(1, 2, WRITE_COUNTS) +
+    make_write_read_plan(3, 2, WRITE_COUNTS)
+)
 
 SEQ_LIST = {
-    CH1: (
-        [(1, 1), (2, 1)] * 50 +
-        [(3, 1), (2, 1)] * 50 +
-        [(1, 1), (2, 1)] * 50 +
-        [(3, 1), (2, 1)] * 50 
-    ),
-    CH2: (
-        [(1, 1), (2, 1)] * 50 +
-        [(3, 1), (2, 1)] * 50 +
-        [(1, 1), (2, 1)] * 50 +
-        [(3, 1), (2, 1)] * 50 
-    ),
+    CH1: SEQ_PLAN,
+    CH2: SEQ_PLAN,
 }
 
 

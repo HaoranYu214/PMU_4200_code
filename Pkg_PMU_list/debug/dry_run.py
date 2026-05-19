@@ -265,6 +265,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    
-dry_run_script("Pkg_PMU_list/1C_two_stage_delay_read.py", no_save=True)

@@ -11,6 +11,7 @@ import time
 import pandas as pd
 
 from src.data_processing import merge_channels, read_both_channels
+from debug.waveform_preview import preview_sequence_configs
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
 
@@ -102,6 +103,12 @@ test3_entry = {
 }
 
 TEST_PLAN = ([test1_entry, test2_entry] * REPEAT_12) + ([test3_entry, test2_entry] * REPEAT_32)
+
+
+def preview_waveforms(output_path=None):
+    """Preview the three standalone waveforms without connecting to the PMU."""
+    configs = [ch1_config_test1, ch1_config_test2, ch1_config_test3]
+    return preview_sequence_configs(configs, output_path, title_prefix="Two-stage delay CH1")
 
 
 def run_single_test(query, test_name, seq_configs):

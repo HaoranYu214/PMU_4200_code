@@ -16,6 +16,7 @@ LOOP_COUNT = 3000
 SAVE_EVERY_RUN = True
 STOP_ON_ERROR = True
 FILE_STEM_PREFIX = "ftj_endurance"
+SUMMARY_CSV = SAVE_DIR / f"{FILE_STEM_PREFIX}_summary_live.csv"
 
 
 def load_ftj_module():
@@ -54,30 +55,12 @@ def main():
             print(error_text)
             if STOP_ON_ERROR:
                 end_time = datetime.now()
-                summary_rows.append(
-                    {
-                        "run_index": run_index,
-                        "status": status,
-                        "start_time": start_time,
-                        "end_time": end_time,
-                        "duration_s": (end_time - start_time).total_seconds(),
-                        "output_path": str(output_path) if output_path else "",
-                        "error": error_text,
-                    }
-                )
+                summary_rows.append(make_summary_row(run_index, status, start_time, end_time, output_path, error_text))
+                save_live_summary(summary_rows)
                 break
         end_time = datetime.now()
-        summary_rows.append(
-            {
-                "run_index": run_index,
-                "status": status,
-                "start_time": start_time,
-                "end_time": end_time,
-                "duration_s": (end_time - start_time).total_seconds(),
-                "output_path": str(output_path) if output_path else "",
-                "error": error_text,
-            }
-        )
+        summary_rows.append(make_summary_row(run_index, status, start_time, end_time, output_path, error_text))
+        save_live_summary(summary_rows)
         print(f"FTJ endurance run {run_index}/{LOOP_COUNT} finished with status={status}")
 
         if status != "ok" and STOP_ON_ERROR:
@@ -88,6 +71,24 @@ def main():
     summary_path = SAVE_DIR / f"{FILE_STEM_PREFIX}_summary_{summary_timestamp}.xlsx"
     summary_df.to_excel(summary_path, index=False)
     print(f"Saved FTJ endurance summary to {summary_path}")
+
+
+def make_summary_row(run_index, status, start_time, end_time, output_path, error_text):
+    """Build one summary row for both live and final summaries."""
+    return {
+        "run_index": run_index,
+        "status": status,
+        "start_time": start_time,
+        "end_time": end_time,
+        "duration_s": (end_time - start_time).total_seconds(),
+        "output_path": str(output_path) if output_path else "",
+        "error": error_text,
+    }
+
+
+def save_live_summary(summary_rows):
+    """Persist progress after every completed run."""
+    pd.DataFrame(summary_rows).to_csv(SUMMARY_CSV, index=False)
 
 
 if __name__ == "__main__":
