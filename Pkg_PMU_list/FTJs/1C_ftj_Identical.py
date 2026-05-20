@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""FTJ segARB script with direct seq_configs and shared time arrays."""
+"""FTJ identical-pulse script."""
 
 from datetime import datetime
 from pathlib import Path
@@ -18,72 +18,90 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\Test")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\03A6\50um-2\FTJ\Identical")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
-FILE_STEM = "ftj_test"
+FILE_STEM = "ftj_identical"
 
-CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
+CURRENT_RANGES = {CH1: 1e-7, CH2: 1e-7}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e7,
-    "ENABLE_LLEC": True,
+    "LOAD_RESISTANCE": 1,
+    "ENABLE_LLEC": False,
 }
 
 
-Vibas_seq1 = 5
-Vibas_seq2 = 1
-Vibas_seq3 = -1.8
+WRITE_POSITIVE_V = 5
+READ_V = -1
+WRITE_NEGATIVE_V = -4
 
-Dwell_seq1 = 1e-6
-Dwell_seq2 = 1e-3
-Dwell_seq3 = 1e-6
+WRITE_POSITIVE_DWELL = 1e-5
+READ_DWELL = 1e-3
+WRITE_NEGATIVE_DWELL = 1e-5
+PREVIEW_ONLY = False
+
+WRITE_POSITIVE_SEQ_ID = 1
+READ_POSITIVE_SEQ_ID = 2
+WRITE_NEGATIVE_SEQ_ID = 3
+READ_NEGATIVE_SEQ_ID = 4
+
+POSITIVE_REPEAT_COUNT = 20
+NEGATIVE_REPEAT_COUNT = 20
 
 
 # Shared clock definition for each sequence.
-time_values_seq1 = [1e-3, 2e-7, Dwell_seq1, 2e-7, 0.1]
-time_values_seq2 = [1e-3, 2e-7, Dwell_seq2, 2e-7, 0.1]
-time_values_seq3 = [1e-3, 2e-7, Dwell_seq3, 2e-7, 0.1]
+time_values_write_positive = [1e-3, 1e-6, WRITE_POSITIVE_DWELL, 1e-6, 1e-2]
+time_values_read = [1e-3, 1e-6, READ_DWELL, 1e-6, 1e-2]
+time_values_write_negative = [1e-3, 1e-6, WRITE_NEGATIVE_DWELL, 1e-6, 1e-2]
 
 # Measurement start/stop are percentages of each segment window, so use values in [0, 1].
-meas_types_seq1 = [0, 0, 0, 0, 0]
-meas_start_seq1 = [0.0, 0.0, 0.0, 0.0, 0.0]
-meas_stop_seq1 = time_values_seq1
+meas_types_write_positive = [0, 0, 0, 0, 0]
+meas_start_write_positive = [0.0, 0.0, 0.0, 0.0, 0.0]
+meas_stop_write_positive = time_values_write_positive
 
-meas_types_seq2 = [0, 0, 1, 0, 0]
-meas_start_seq2 = [x * 0.5 for x in time_values_seq2]
-meas_stop_seq2  = [x * 0.9 for x in time_values_seq2]
+meas_types_read = [0, 0, 1, 0, 0]
+meas_start_read = [x * 0.5 for x in time_values_read]
+meas_stop_read = [x * 0.9 for x in time_values_read]
 
-meas_types_seq3 = [0, 0, 0, 0, 0]
-meas_start_seq3 = [0.0, 0.0, 0.0, 0.0, 0.0]
-meas_stop_seq3 = time_values_seq3
+meas_types_write_negative = [0, 0, 0, 0, 0]
+meas_start_write_negative = [0.0, 0.0, 0.0, 0.0, 0.0]
+meas_stop_write_negative = time_values_write_negative
 
 # Put voltage arrays in the config area so they are easy to edit.
-ch1_start_v_seq1 = [0.0, 0.0, Vibas_seq1, Vibas_seq1, 0]
-ch1_stop_v_seq1 = [0.0, Vibas_seq1, Vibas_seq1, 0.0, 0]
+ch1_start_v_write_positive = [0.0, 0.0, WRITE_POSITIVE_V, WRITE_POSITIVE_V, 0]
+ch1_stop_v_write_positive = [0.0, WRITE_POSITIVE_V, WRITE_POSITIVE_V, 0.0, 0]
 ch2_start_v_seq1 = [0] * 5
 ch2_stop_v_seq1 = [0] * 5
 
-ch1_start_v_seq2 = [0.0, 0.0, Vibas_seq2, Vibas_seq2, 0]
-ch1_stop_v_seq2 = [0.0, Vibas_seq2, Vibas_seq2, 0.0, 0]
+ch1_start_v_read1 = [0.0, 0.0, READ_V, READ_V, 0]
+ch1_stop_v_read1 = [0.0, READ_V, READ_V, 0.0, 0]
+ch1_start_v_read2 = [0.0, 0.0, -READ_V, -READ_V, 0]
+ch1_stop_v_read2 = [0.0, -READ_V, -READ_V, 0.0, 0]
+
+
 ch2_start_v_seq2 = [0] * 5
 ch2_stop_v_seq2 = [0] * 5
 
-ch1_start_v_seq3 = [0.0, 0.0, Vibas_seq3, Vibas_seq3, 0]
-ch1_stop_v_seq3 = [0.0, Vibas_seq3, Vibas_seq3, 0.0, 0]
+ch1_start_v_write_negative = [0.0, 0.0, WRITE_NEGATIVE_V, WRITE_NEGATIVE_V, 0]
+ch1_stop_v_write_negative = [0.0, WRITE_NEGATIVE_V, WRITE_NEGATIVE_V, 0.0, 0]
 ch2_start_v_seq3 = [0] * 5
 ch2_stop_v_seq3 = [0] * 5
 
-ch1_config_seq1 = (1, ch1_start_v_seq1, ch1_stop_v_seq1, time_values_seq1, meas_types_seq1, meas_start_seq1, meas_stop_seq1)
-ch2_config_seq1 = (1, ch2_start_v_seq1, ch2_stop_v_seq1, time_values_seq1, meas_types_seq1, meas_start_seq1, meas_stop_seq1)
-ch1_config_seq2 = (2, ch1_start_v_seq2, ch1_stop_v_seq2, time_values_seq2, meas_types_seq2, meas_start_seq2, meas_stop_seq2)
-ch2_config_seq2 = (2, ch2_start_v_seq2, ch2_stop_v_seq2, time_values_seq2, meas_types_seq2, meas_start_seq2, meas_stop_seq2)
-ch1_config_seq3 = (3, ch1_start_v_seq3, ch1_stop_v_seq3, time_values_seq3, meas_types_seq3, meas_start_seq3, meas_stop_seq3)
-ch2_config_seq3 = (3, ch2_start_v_seq3, ch2_stop_v_seq3, time_values_seq3, meas_types_seq3, meas_start_seq3, meas_stop_seq3)
+ch1_config_write_positive = (WRITE_POSITIVE_SEQ_ID, ch1_start_v_write_positive, ch1_stop_v_write_positive, time_values_write_positive, meas_types_write_positive, meas_start_write_positive, meas_stop_write_positive)
+ch2_config_write_positive = (WRITE_POSITIVE_SEQ_ID, ch2_start_v_seq1, ch2_stop_v_seq1, time_values_write_positive, meas_types_write_positive, meas_start_write_positive, meas_stop_write_positive)
+
+ch1_config_read1 = (READ_POSITIVE_SEQ_ID, ch1_start_v_read1, ch1_stop_v_read1, time_values_read, meas_types_read, meas_start_read, meas_stop_read)
+ch2_config_read1 = (READ_POSITIVE_SEQ_ID, ch2_start_v_seq2, ch2_stop_v_seq2, time_values_read, meas_types_read, meas_start_read, meas_stop_read)
+ch1_config_read2 = (READ_NEGATIVE_SEQ_ID, ch1_start_v_read2, ch1_stop_v_read2, time_values_read, meas_types_read, meas_start_read, meas_stop_read)
+ch2_config_read2 = (READ_NEGATIVE_SEQ_ID, ch2_start_v_seq2, ch2_stop_v_seq2, time_values_read, meas_types_read, meas_start_read, meas_stop_read)
+
+
+ch1_config_write_negative = (WRITE_NEGATIVE_SEQ_ID, ch1_start_v_write_negative, ch1_stop_v_write_negative, time_values_write_negative, meas_types_write_negative, meas_start_write_negative, meas_stop_write_negative)
+ch2_config_write_negative = (WRITE_NEGATIVE_SEQ_ID, ch2_start_v_seq3, ch2_stop_v_seq3, time_values_write_negative, meas_types_write_negative, meas_start_write_negative, meas_stop_write_negative)
 
 seq_configs = {
-    CH1: [ch1_config_seq1, ch1_config_seq2, ch1_config_seq3],
-    CH2: [ch2_config_seq1, ch2_config_seq2, ch2_config_seq3],
+    CH1: [ch1_config_write_positive, ch1_config_read1, ch1_config_read2, ch1_config_write_negative],
+    CH2: [ch2_config_write_positive, ch2_config_read1, ch2_config_read2, ch2_config_write_negative],
 }
 
 # Equivalent to :PMU:SARB:WFM:SEQ:LIST.
@@ -96,29 +114,25 @@ seq_configs = {
 #     ),
 # }
 
+SEQ_PLAN = (
+    [(WRITE_POSITIVE_SEQ_ID, 1), (READ_POSITIVE_SEQ_ID, 1), (READ_NEGATIVE_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT +
+    [(WRITE_NEGATIVE_SEQ_ID, 1),  (READ_NEGATIVE_SEQ_ID, 1), (READ_POSITIVE_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT +
+    [(WRITE_POSITIVE_SEQ_ID, 1), (READ_POSITIVE_SEQ_ID, 1), (READ_NEGATIVE_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT +
+    [(WRITE_NEGATIVE_SEQ_ID, 1), (READ_NEGATIVE_SEQ_ID, 1), (READ_POSITIVE_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT
+)
+
+
 SEQ_LIST = {
-    CH1: (
-        [(1, 1), (2, 1)] * 50 +
-        [(3, 1), (2, 1)] * 50 +
-        [(1, 1), (2, 1)] * 50 +
-        [(3, 1), (2, 1)] * 50 
-    ),
-    CH2: (
-        [(1, 1), (2, 1)] * 50 +
-        [(3, 1), (2, 1)] * 50 +
-        [(1, 1), (2, 1)] * 50 +
-        [(3, 1), (2, 1)] * 50 
-    ),
+    CH1: SEQ_PLAN,
+    CH2: SEQ_PLAN,
 }
 
 def preview_waveform(output_path=None):
-    """Save a CH1 voltage preview for the generated ISPP sequences."""
-    if output_path is None:
-        output_path = SAVE_DIR / f"{FILE_STEM}_preview.png"
+    """Preview the generated identical-pulse waveform on CH1."""
     return preview_sequence_configs(
-        [ch1_config_seq1, ch1_config_seq2, ch1_config_seq3],
+        [ch1_config_write_positive, ch1_config_read1, ch1_config_read2, ch1_config_write_negative],
         output_path,
-        title_prefix="ISPP CH1",
+        title_prefix="FTJ Identical CH1",
     )
 
 
@@ -152,7 +166,7 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
                 {"name": name, "value": repr(value)}
                 for name, value in globals().items()
                 if name.isupper()
-                or name.startswith(("Vibas_", "Dwell_", "time_values_", "meas_", "ch1_", "ch2_", "seq_configs", "SEQ_LIST"))
+                or name.startswith(("WRITE_", "READ_", "time_values_", "meas_", "ch1_", "ch2_", "seq_configs", "SEQ_LIST", "SEQ_PLAN"))
             ]
         )
 
@@ -172,9 +186,11 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
 
 def main():
     """Run the FTJ segARB sequence list and save raw data."""
+    if PREVIEW_ONLY:
+        preview_waveform()
+        return
     run_ftj_test()
 
 
 if __name__ == "__main__":
-    # main()
-    preview_waveform()
+    main()

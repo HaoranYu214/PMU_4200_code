@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""External loop endurance runner for the FTJ segARB test."""
+"""External loop endurance runner for FTJ scripts."""
 
 from datetime import datetime
 import importlib.util
@@ -13,7 +13,8 @@ if str(PKG_ROOT) not in sys.path:
 
 import pandas as pd
 
-FTJ_SCRIPT = Path(__file__).with_name("1C_ftj_test.py")
+TARGET_SCRIPT_NAME = "1C_ftj_Identical.py"
+FTJ_SCRIPT = Path(__file__).with_name(TARGET_SCRIPT_NAME)
 SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ_endurance")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -26,6 +27,8 @@ SUMMARY_CSV = SAVE_DIR / f"{FILE_STEM_PREFIX}_summary_live.csv"
 
 def load_ftj_module():
     """Load the FTJ test script from its file path."""
+    if not FTJ_SCRIPT.exists():
+        raise FileNotFoundError(f"FTJ target script not found: {FTJ_SCRIPT}")
     spec = importlib.util.spec_from_file_location("ftj_test_module", FTJ_SCRIPT)
     if spec is None or spec.loader is None:
         raise ImportError(f"Unable to load FTJ script: {FTJ_SCRIPT}")

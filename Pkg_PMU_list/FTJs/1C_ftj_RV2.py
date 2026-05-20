@@ -18,46 +18,48 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\Test")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\03A6\50um-2\FTJ\RV")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_rv"
 
-CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
+CURRENT_RANGES = {CH1: 1e-6, CH2: 1e-6}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e7,
-    "ENABLE_LLEC": True,
+    "LOAD_RESISTANCE": 1e6,
+    "ENABLE_LLEC": False,
 }
 
-OFFSET_V = 0.0
-WRITE_V_MAX = 2.0
-WRITE_V_STEP = 0.1
-READ_V = 0.1
-PREPOST_V = -WRITE_V_MAX
+OFFSET_V = 0
+VP = 5
+WRITE_LEVEL_STEP = 0.2
+READ_LEVEL = 2
+PREPOST_LEVEL = -VP
+SCAN_CYCLES = 2
 
-PREPOST_DWELL = 1e-6
-WRITE_DWELL = 1e-6
-READ_DWELL = 1e-5
+PREPOST_DWELL = 1e-4
+WRITE_DWELL = 1e-4
+READ_DWELL = 1e-3
 
-PREPOST_IDLE_1 = 1e-3
-PREPOST_RISE = 2e-7
-PREPOST_FALL = 2e-7
-PREPOST_IDLE_2 = 1e-3
+PREPOST_IDLE_1 = 5e-3
+PREPOST_RISE = 1e-4
+PREPOST_FALL = 1e-4
+PREPOST_IDLE_2 = 0.1
 
 WRITE_IDLE_1 = 1e-3
-WRITE_RISE = 2e-7
-WRITE_FALL = 2e-7
-WRITE_IDLE_2 = 1e-3
+WRITE_RISE = 1e-4
+WRITE_FALL = 1e-4
+WRITE_IDLE_2 = 0.1
 
 READ_IDLE_1 = 1e-3
-READ_RISE = 2e-7
-READ_FALL = 2e-7
-READ_IDLE_2 = 1e-3
+READ_RISE = 1e-4
+READ_FALL = 1e-4
+READ_IDLE_2 = 0.1
 
 PREPOST_SEQ_ID = 1
-SCAN_SEQ_ID = 2
-MAX_SEGMENTS_PER_SEQ = 10000
+FIRST_SCAN_SEQ_ID = 2
+SEGMENTS_PER_SCAN_POINT = 10
+MAX_SEGMENTS_PER_SEQ = 1000
 
 PREVIEW_ONLY = False
 
@@ -78,26 +80,52 @@ meas_start_read = [0.0, 0.0, READ_DWELL * 0.5, 0.0, 0.0]
 meas_stop_read = [time_values_read[0], time_values_read[1], READ_DWELL * 0.9, time_values_read[3], time_values_read[4]]
 
 
-def build_pulse_block(amplitude, time_values):
-    """Return a 5-segment offset -> amplitude -> offset pulse block."""
-    start_v = [OFFSET_V, OFFSET_V, amplitude, amplitude, OFFSET_V]
-    stop_v = [OFFSET_V, amplitude, amplitude, OFFSET_V, OFFSET_V]
+def build_pulse_block(level, time_values):
+    """Return a 5-segment offset -> (offset + level) -> offset pulse block."""
+    target_v = OFFSET_V + level
+    start_v = [OFFSET_V, OFFSET_V, target_v, target_v, OFFSET_V]
+    stop_v = [OFFSET_V, target_v, target_v, OFFSET_V, OFFSET_V]
     return start_v, stop_v, list(time_values)
 
 
-def voltage_sweep_path(vmax, step):
-    """Return offset -> +Vmax -> offset -> -Vmax -> offset scan amplitudes."""
-    n_steps = max(1, int(round(vmax / step)))
-    positive = [round(step * i, 10) for i in range(1, n_steps + 1)]
-    back_to_zero = [round(step * i, 10) for i in range(n_steps - 1, -1, -1)]
-    negative = [round(-step * i, 10) for i in range(1, n_steps + 1)]
-    back_from_negative = [round(-step * i, 10) for i in range(n_steps - 1, -1, -1)]
-    return positive + back_to_zero + negative + back_from_negative
+def _levels_between(start_level, stop_level, step):
+    """Return inclusive levels from start_level to stop_level."""
+    if start_level == stop_level:
+        return [round(start_level, 10)]
+
+    step = abs(step)
+    direction = 1 if stop_level > start_level else -1
+    step *= direction
+
+    levels = []
+    current = start_level
+    while (direction > 0 and current < stop_level) or (direction < 0 and current > stop_level):
+        levels.append(round(current, 10))
+        current += step
+    levels.append(round(stop_level, 10))
+    return levels
+
+
+def voltage_sweep_path(vp, step, cycles=1):
+    """Return relative levels: +Vp -> -Vp -> +Vp, repeated for the requested cycles."""
+    if vp == 0:
+        return []
+
+    path = []
+    for cycle_index in range(cycles):
+        down_leg = _levels_between(vp, -vp, step)
+        up_leg = _levels_between(-vp, vp, step)
+        if cycle_index == 0:
+            path.extend(down_leg)
+        else:
+            path.extend(down_leg[1:])
+        path.extend(up_leg[1:])
+    return path
 
 
 def make_prepost_sequence():
     """Build the prepost sequence: one pulse only."""
-    start_v, stop_v, time_values = build_pulse_block(PREPOST_V, time_values_prepost)
+    start_v, stop_v, time_values = build_pulse_block(PREPOST_LEVEL, time_values_prepost)
     ch1_config = (PREPOST_SEQ_ID, start_v, stop_v, time_values, meas_types_prepost, meas_start_prepost, meas_stop_prepost)
     ch2_config = (
         PREPOST_SEQ_ID,
@@ -111,8 +139,8 @@ def make_prepost_sequence():
     return ch1_config, ch2_config
 
 
-def make_scan_sequence(voltages):
-    """Build one large sequence: write pulse, then small read pulse, for every scan point."""
+def make_scan_sequence(seq_id, voltages):
+    """Build one scan sequence: write pulse, then small read pulse, for a chunk of scan points."""
     ch1_start_v = []
     ch1_stop_v = []
     ch2_start_v = []
@@ -133,7 +161,7 @@ def make_scan_sequence(voltages):
         meas_start.extend(meas_start_write)
         meas_stop.extend(meas_stop_write)
 
-        read_start_v, read_stop_v, read_times = build_pulse_block(READ_V, time_values_read)
+        read_start_v, read_stop_v, read_times = build_pulse_block(READ_LEVEL, time_values_read)
         ch1_start_v.extend(read_start_v)
         ch1_stop_v.extend(read_stop_v)
         ch2_start_v.extend([0.0] * len(read_times))
@@ -149,22 +177,43 @@ def make_scan_sequence(voltages):
             f"above MAX_SEGMENTS_PER_SEQ={MAX_SEGMENTS_PER_SEQ}."
         )
 
-    ch1_config = (SCAN_SEQ_ID, ch1_start_v, ch1_stop_v, time_values, meas_types, meas_start, meas_stop)
-    ch2_config = (SCAN_SEQ_ID, ch2_start_v, ch2_stop_v, time_values, meas_types, meas_start, meas_stop)
+    ch1_config = (seq_id, ch1_start_v, ch1_stop_v, time_values, meas_types, meas_start, meas_stop)
+    ch2_config = (seq_id, ch2_start_v, ch2_stop_v, time_values, meas_types, meas_start, meas_stop)
     return ch1_config, ch2_config
 
 
-SCAN_VOLTAGES = voltage_sweep_path(WRITE_V_MAX, WRITE_V_STEP)
+def chunk_scan_voltages(voltages):
+    """Split scan voltages into multiple sequences to stay below the PMU segment limit."""
+    max_points_per_seq = max(1, MAX_SEGMENTS_PER_SEQ // SEGMENTS_PER_SCAN_POINT)
+    return [
+        voltages[index : index + max_points_per_seq]
+        for index in range(0, len(voltages), max_points_per_seq)
+    ]
+
+
+SCAN_LEVELS = voltage_sweep_path(
+    VP,
+    WRITE_LEVEL_STEP,
+    SCAN_CYCLES,
+)
+SCAN_VOLTAGES = [OFFSET_V + level for level in SCAN_LEVELS]
+SCAN_LEVEL_CHUNKS = chunk_scan_voltages(SCAN_LEVELS)
 
 ch1_prepost_config, ch2_prepost_config = make_prepost_sequence()
-ch1_scan_config, ch2_scan_config = make_scan_sequence(SCAN_VOLTAGES)
+scan_seq_ids = [FIRST_SCAN_SEQ_ID + index for index in range(len(SCAN_LEVEL_CHUNKS))]
+scan_config_pairs = [
+    make_scan_sequence(seq_id, chunk)
+    for seq_id, chunk in zip(scan_seq_ids, SCAN_LEVEL_CHUNKS)
+]
+ch1_scan_configs = [pair[0] for pair in scan_config_pairs]
+ch2_scan_configs = [pair[1] for pair in scan_config_pairs]
 
 seq_configs = {
-    CH1: [ch1_prepost_config, ch1_scan_config],
-    CH2: [ch2_prepost_config, ch2_scan_config],
+    CH1: [ch1_prepost_config] + ch1_scan_configs,
+    CH2: [ch2_prepost_config] + ch2_scan_configs,
 }
 
-SEQ_PLAN = [(PREPOST_SEQ_ID, 1), (SCAN_SEQ_ID, 1)]
+SEQ_PLAN = [(PREPOST_SEQ_ID, 1)] + [(seq_id, 1) for seq_id in scan_seq_ids]
 SEQ_LIST = {
     CH1: SEQ_PLAN,
     CH2: SEQ_PLAN,
@@ -174,27 +223,33 @@ SEQ_LIST = {
 def preview_waveform(output_path=None):
     """Preview the generated RV waveform on CH1."""
     return preview_sequence_configs(
-        [ch1_prepost_config, ch1_scan_config],
+        [ch1_prepost_config] + ch1_scan_configs,
         output_path,
         title_prefix="FTJ RV CH1",
     )
 
 
 def build_readback_table(df_ch1, df_ch2):
-    """Return only the readback points, one row per write voltage."""
+    """Return only the readback points, one row per commanded write level."""
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
         raise ValueError("RV run returned empty data.")
 
     count = min(len(df_ch1), len(df_ch2), len(SCAN_VOLTAGES))
     rv_df = pd.DataFrame(
         {
-            "WriteVoltage": SCAN_VOLTAGES[:count],
-            "ReadTimestamp": df_ch1[f"Timestamp {CH1}"].values[:count],
-            "ReadVoltage": df_ch1[f"Voltage {CH1}"].values[:count],
-            "ReadCurrent": df_ch1[f"Current {CH1}"].values[:count],
+            "CommandedWriteLevel": SCAN_LEVELS[:count],
+            "CommandedWriteVoltage": SCAN_VOLTAGES[:count],
+            "TimestampI1": df_ch1[f"Timestamp {CH1}"].values[:count],
+            "TimestampI2": df_ch2[f"Timestamp {CH2}"].values[:count],
+            "ReadVoltageI1": df_ch1[f"Voltage {CH1}"].values[:count],
+            "ReadVoltageI2": df_ch2[f"Voltage {CH2}"].values[:count],
+            "CurrentI1": df_ch1[f"Current {CH1}"].values[:count],
+            "CurrentI2": df_ch2[f"Current {CH2}"].values[:count],
         }
     )
-    rv_df["Resistance"] = rv_df["ReadVoltage"] / rv_df["ReadCurrent"].replace(0, pd.NA)
+    rv_df["ReadVoltageDiff"] = rv_df["ReadVoltageI1"] - rv_df["ReadVoltageI2"]
+    rv_df["ResistanceI1"] = rv_df["ReadVoltageI1"] / rv_df["CurrentI1"].replace(0, pd.NA)
+    rv_df["ResistanceI2"] = rv_df["ReadVoltageDiff"] / (-rv_df["CurrentI2"]).replace(0, pd.NA)
     return rv_df
 
 

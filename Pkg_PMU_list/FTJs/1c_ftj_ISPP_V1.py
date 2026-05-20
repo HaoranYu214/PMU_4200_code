@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""FTJ segARB script with direct seq_configs and shared time arrays."""
+"""FTJ ISPP V1 script."""
 
 from datetime import datetime
 from pathlib import Path
@@ -14,12 +14,13 @@ if str(PKG_ROOT) not in sys.path:
 from src.data_processing import read_both_channels
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
+from debug.waveform_preview import preview_sequence_configs
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ endurance")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
-FILE_STEM = "ftj_test"
+FILE_STEM = "ftj_ispp_v1"
 
 CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
@@ -42,8 +43,9 @@ WRITE_DWELL = 1e-6
 READ_DWELL = 1e-5
 
 READ_SEQ_ID = 1
-POS_SEQ_START_ID = 2
-NEG_SEQ_START_ID = POS_SEQ_START_ID + POS_STEPS
+WRITE_POSITIVE_SEQ_START_ID = 2
+WRITE_NEGATIVE_SEQ_START_ID = WRITE_POSITIVE_SEQ_START_ID + POS_STEPS
+PREVIEW_ONLY = False
 
 
 # Shared clock definition for each sequence.
@@ -107,8 +109,8 @@ POS_VOLTAGES = voltage_steps(POS_V_START, POS_V_STOP, POS_STEPS)
 NEG_VOLTAGES = voltage_steps(NEG_V_START, NEG_V_STOP, NEG_STEPS)
 
 ch1_read_config, ch2_read_config = make_read_configs()
-ch1_pos_configs, ch2_pos_configs = make_write_configs(POS_SEQ_START_ID, POS_VOLTAGES)
-ch1_neg_configs, ch2_neg_configs = make_write_configs(NEG_SEQ_START_ID, NEG_VOLTAGES)
+ch1_pos_configs, ch2_pos_configs = make_write_configs(WRITE_POSITIVE_SEQ_START_ID, POS_VOLTAGES)
+ch1_neg_configs, ch2_neg_configs = make_write_configs(WRITE_NEGATIVE_SEQ_START_ID, NEG_VOLTAGES)
 
 seq_configs = {
     CH1: [ch1_read_config] + ch1_pos_configs + ch1_neg_configs,
@@ -118,8 +120,8 @@ seq_configs = {
 # Equivalent to :PMU:SARB:WFM:SEQ:LIST.
 # Each tuple is (seq_id, loop_count), so loop_count repeats that seq in hardware.
 SEQ_PLAN = (
-    make_ispp_plan(POS_SEQ_START_ID, POS_STEPS) +
-    make_ispp_plan(NEG_SEQ_START_ID, NEG_STEPS)
+    make_ispp_plan(WRITE_POSITIVE_SEQ_START_ID, POS_STEPS) +
+    make_ispp_plan(WRITE_NEGATIVE_SEQ_START_ID, NEG_STEPS)
 )
 
 SEQ_LIST = {
@@ -127,6 +129,15 @@ SEQ_LIST = {
     
     CH2: SEQ_PLAN,
 }
+
+
+def preview_waveform(output_path=None):
+    """Preview the generated ISPP V1 waveform on CH1."""
+    return preview_sequence_configs(
+        [ch1_read_config] + ch1_pos_configs + ch1_neg_configs,
+        output_path,
+        title_prefix="FTJ ISPP V1 CH1",
+    )
 
 
 
@@ -160,7 +171,7 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
                 {"name": name, "value": repr(value)}
                 for name, value in globals().items()
                 if name.isupper()
-                or name.startswith(("Vibas_", "Dwell_", "time_values_", "meas_", "ch1_", "ch2_", "seq_configs", "SEQ_LIST"))
+                or name.startswith(("WRITE_", "READ_", "POS_", "NEG_", "time_values_", "meas_", "ch1_", "ch2_", "seq_configs", "SEQ_LIST", "SEQ_PLAN"))
             ]
         )
 
@@ -180,6 +191,9 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
 
 def main():
     """Run the FTJ segARB sequence list and save raw data."""
+    if PREVIEW_ONLY:
+        preview_waveform()
+        return
     run_ftj_test()
 
 
