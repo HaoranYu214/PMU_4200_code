@@ -18,28 +18,29 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\03A6\50um-2\FTJ\RV")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\03C6\20um circle_1\FTJ\RV")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_rv"
 
-CURRENT_RANGES = {CH1: 1e-6, CH2: 1e-6}
+CURRENT_RANGES = {CH1: 1e-4, CH2: 1e-4}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e6,
+    "LOAD_RESISTANCE": 1,
     "ENABLE_LLEC": False,
 }
 
-OFFSET_V = 0
-VP = 5
+OFFSET_V = -2
+VP = 6
 WRITE_LEVEL_STEP = 0.2
-READ_LEVEL = 2
+READ = -1
+READ_LEVEL = READ-OFFSET_V
 PREPOST_LEVEL = -VP
-SCAN_CYCLES = 2
+SCAN_CYCLES = 1
 
-PREPOST_DWELL = 1e-4
-WRITE_DWELL = 1e-4
-READ_DWELL = 1e-3
+PREPOST_DWELL = 1e-3
+WRITE_DWELL = 5e-5
+READ_DWELL = 5e-5
 
 PREPOST_IDLE_1 = 5e-3
 PREPOST_RISE = 1e-4
@@ -229,6 +230,66 @@ def preview_waveform(output_path=None):
     )
 
 
+def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, add_gap=True):
+    """Append t-V endpoint pairs for one waveform block."""
+    cursor = start_time
+    for segment_start_v, segment_stop_v, segment_time in zip(start_v, stop_v, time_values):
+        next_cursor = cursor + segment_time
+        points.append((cursor, segment_start_v))
+        points.append((next_cursor, segment_stop_v))
+        cursor = next_cursor
+    if add_gap:
+        points.append((None, None))
+    return cursor
+
+
+def build_waveform_trace_table():
+    """Return one wide t-V table for plotting prepost, write, and read waveforms."""
+    prepost_points = []
+    write_points = []
+    read_points = []
+    cursor = 0.0
+
+    cursor = _extend_trace_points(
+        prepost_points,
+        ch1_prepost_config[1],
+        ch1_prepost_config[2],
+        ch1_prepost_config[3],
+        cursor,
+        add_gap=False,
+    )
+
+    for chunk in SCAN_LEVEL_CHUNKS:
+        for level in chunk:
+            write_start_v, write_stop_v, write_times = build_pulse_block(level, time_values_write)
+            cursor = _extend_trace_points(
+                write_points,
+                write_start_v,
+                write_stop_v,
+                write_times,
+                cursor,
+            )
+
+            read_start_v, read_stop_v, read_times = build_pulse_block(READ_LEVEL, time_values_read)
+            cursor = _extend_trace_points(
+                read_points,
+                read_start_v,
+                read_stop_v,
+                read_times,
+                cursor,
+            )
+
+    trace_columns = {
+        "Time_Prepost_s": [time for time, _voltage in prepost_points],
+        "Voltage_Prepost_V": [voltage for _time, voltage in prepost_points],
+        "Time_Write_s": [time for time, _voltage in write_points],
+        "Voltage_Write_V": [voltage for _time, voltage in write_points],
+        "Time_Read_s": [time for time, _voltage in read_points],
+        "Voltage_Read_V": [voltage for _time, voltage in read_points],
+    }
+    return pd.DataFrame({name: pd.Series(values) for name, values in trace_columns.items()})
+
+
 def build_readback_table(df_ch1, df_ch2):
     """Return only the readback points, one row per commanded write level."""
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
@@ -270,6 +331,7 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
         power_off_outputs(query, (CH1, CH2))
 
     rv_df = build_readback_table(df_ch1, df_ch2)
+    waveform_df = build_waveform_trace_table()
 
     output_path = None
     if save_results:
@@ -290,12 +352,14 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
             rv_df.to_excel(writer, sheet_name="RV_ReadOnly", index=False)
             df_ch1.to_excel(writer, sheet_name="Channel_1_ReadOnly", index=False)
             df_ch2.to_excel(writer, sheet_name="Channel_2_ReadOnly", index=False)
+            waveform_df.to_excel(writer, sheet_name="Waveform", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
 
     return {
         "df_ch1": df_ch1,
         "df_ch2": df_ch2,
         "rv_df": rv_df,
+        "waveform_df": waveform_df,
         "output_path": output_path,
     }
 

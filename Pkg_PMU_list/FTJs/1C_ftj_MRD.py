@@ -19,44 +19,46 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\Test")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\03C6\20um circle_1\FTJ\MRD")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_mrd"
 
-CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
+CURRENT_RANGES = {CH1: 1e-4, CH2: 1e-4}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e7,
-    "ENABLE_LLEC": True,
+    "LOAD_RESISTANCE": 1,
+    "ENABLE_LLEC": False,
 }
 
 OFFSET_V = 0.0
-REFERENCE_V = -1.0
-WRITE_VOLTAGES = [0.5, 0.6, 0.7, 0.8]
-READ_V = 0.1
+REFERENCE_V = -7
+# WRITE_VOLTAGES = [-2, -2.5, -3, -3.5, -4, -4.5, -5]
+# WRITE_VOLTAGES = [-0.5, -1, -1.5, -2, -2.5, -3, -3.5, -4, -4.5, -5]
+WRITE_VOLTAGES = [0.1, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4]
+READ_V = -2
 CYCLES_PER_LEVEL = 10
 
 REFERENCE_IDLE_1 = 1e-3
-REFERENCE_RISE = 2e-7
-REFERENCE_DWELL = 1e-6
-REFERENCE_FALL = 2e-7
-REFERENCE_IDLE_2 = 1e-3
+REFERENCE_RISE = 1e-6
+REFERENCE_DWELL = 1e-3
+REFERENCE_FALL = 1e-6
+REFERENCE_IDLE_2 = 0.1
 
 WRITE_IDLE_1 = 1e-3
-WRITE_RISE = 2e-7
-WRITE_DWELL = 1e-6
-WRITE_FALL = 2e-7
-WRITE_IDLE_2 = 1e-3
+WRITE_RISE = 1e-6
+WRITE_DWELL = 5e-5
+WRITE_FALL = 1e-6
+WRITE_IDLE_2 = 0.1
 
 READ_IDLE_1 = 1e-3
-READ_RISE = 2e-7
-READ_DWELL = 1e-5
-READ_FALL = 2e-7
-READ_IDLE_2 = 1e-3
+READ_RISE = 1e-6
+READ_DWELL = 5e-5
+READ_FALL = 1e-6
+READ_IDLE_2 = 0.1
 
 BASE_SEQ_ID = 1
-MAX_SEGMENTS_PER_SEQ = 10000
+MAX_SEGMENTS_PER_SEQ = 1024
 
 PREVIEW_ONLY = False
 
@@ -82,11 +84,11 @@ time_values_read = [
     READ_IDLE_2,
 ]
 
-meas_types_reference = [0, 0, 1, 0, 0]
+meas_types_reference = [0, 0, 0, 0, 0]
 meas_start_reference = [0.0] * len(time_values_reference)
 meas_stop_reference = time_values_reference
 
-meas_types_write = [0, 0, 1, 0, 0]
+meas_types_write = [0, 0, 0, 0, 0]
 meas_start_write = [0.0] * len(time_values_write)
 meas_stop_write = time_values_write
 
@@ -212,6 +214,75 @@ def preview_waveform(output_path=None):
     )
 
 
+def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, add_gap=True):
+    """Append t-V endpoint pairs for one waveform block."""
+    cursor = start_time
+    for segment_start_v, segment_stop_v, segment_time in zip(start_v, stop_v, time_values):
+        next_cursor = cursor + segment_time
+        points.append((cursor, segment_start_v))
+        points.append((next_cursor, segment_stop_v))
+        cursor = next_cursor
+    if add_gap:
+        points.append((None, None))
+    return cursor
+
+
+def build_waveform_trace_table():
+    """Return one wide t-V table for plotting reference, write, and read waveforms."""
+    reference_points = []
+    write_points = []
+    read_points = []
+    cursor = 0.0
+
+    for item in SEQ_METADATA:
+        for _cycle_index in range(item["cycles"]):
+            reference_start_v, reference_stop_v, reference_times = build_pulse_block(REFERENCE_V, time_values_reference)
+            cursor = _extend_trace_points(
+                reference_points,
+                reference_start_v,
+                reference_stop_v,
+                reference_times,
+                cursor,
+            )
+
+            read_start_v, read_stop_v, read_times = build_pulse_block(READ_V, time_values_read)
+            cursor = _extend_trace_points(
+                read_points,
+                read_start_v,
+                read_stop_v,
+                read_times,
+                cursor,
+            )
+
+            write_start_v, write_stop_v, write_times = build_pulse_block(item["write_voltage"], time_values_write)
+            cursor = _extend_trace_points(
+                write_points,
+                write_start_v,
+                write_stop_v,
+                write_times,
+                cursor,
+            )
+
+            read_start_v, read_stop_v, read_times = build_pulse_block(READ_V, time_values_read)
+            cursor = _extend_trace_points(
+                read_points,
+                read_start_v,
+                read_stop_v,
+                read_times,
+                cursor,
+            )
+
+    trace_columns = {
+        "Time_Reference_s": [time for time, _voltage in reference_points],
+        "Voltage_Reference_V": [voltage for _time, voltage in reference_points],
+        "Time_Write_s": [time for time, _voltage in write_points],
+        "Voltage_Write_V": [voltage for _time, voltage in write_points],
+        "Time_Read_s": [time for time, _voltage in read_points],
+        "Voltage_Read_V": [voltage for _time, voltage in read_points],
+    }
+    return pd.DataFrame({name: pd.Series(values) for name, values in trace_columns.items()})
+
+
 def build_readback_table(df_ch1, df_ch2):
     """Return one row per measured read point."""
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
@@ -269,6 +340,7 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
 
     result_df = build_readback_table(df_ch1, df_ch2)
     summary_df = build_distribution_summary(result_df)
+    waveform_df = build_waveform_trace_table()
 
     output_path = None
     if save_results:
@@ -290,6 +362,7 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
             summary_df.to_excel(writer, sheet_name="MRD_Summary", index=False)
             df_ch1.to_excel(writer, sheet_name="Channel_1_ReadOnly", index=False)
             df_ch2.to_excel(writer, sheet_name="Channel_2_ReadOnly", index=False)
+            waveform_df.to_excel(writer, sheet_name="Waveform", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
 
     return {
@@ -297,6 +370,7 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
         "df_ch2": df_ch2,
         "result_df": result_df,
         "summary_df": summary_df,
+        "waveform_df": waveform_df,
         "output_path": output_path,
     }
 

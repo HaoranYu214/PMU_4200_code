@@ -14,25 +14,27 @@ if str(PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(PKG_ROOT))
 
 from debug.waveform_preview import preview_sequence_configs
-from src.data_processing import calculate_polarization, read_both_channels, save_channels_separate_excel
+from src.current_range import acquire_with_auto_current_range
+from src.data_processing import calculate_polarization, read_both_channels
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 params = dict(
-    rise_time=1e-4,
-    dwell_time=1e-5,
+    rise_time=1e-5,
+    dwell_time=2e-8,
     delay_time=1e-5,
     Vp=5,
     offset=0,
     # area_cm2=1.2567e-5,
-    area_cm2=7.854e-5,
-    Irange1=1e-4,
+    # area_cm2=(35*1e-4)**2*3.14,
+    area_cm2=4e-6,
+    Irange1=1e-3,
     Irange2=1e-4,
 )
 
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\03A6\50um-2\PUND")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\11-06-2026\03D2\L40um1\FE\freqency")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEW_ONLY = False
 
@@ -148,6 +150,56 @@ def make_pund_seq_configs():
 def preview_waveform(output_path=None):
     """Preview the PUND waveform without connecting to the PMU."""
     return preview_sequence_configs(make_pund_seq_configs()[CH1], output_path, title_prefix="PUND CH1")
+
+
+def build_params_table():
+    """Return the PUND run parameters as a two-column table."""
+    return pd.DataFrame(
+        [{"name": name, "value": repr(value)} for name, value in params.items()]
+    )
+
+
+def save_pund_workbook(output_path, df_ch1, df_ch2, data):
+    """Save raw data, analysis data, and parameters into one Excel workbook."""
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        df_ch1.to_excel(writer, sheet_name="Channel_1", index=False)
+        df_ch2.to_excel(writer, sheet_name="Channel_2", index=False)
+        data["df_total"].to_excel(writer, sheet_name="Total", index=False)
+        data["pund_diff"].to_excel(writer, sheet_name="PUND_Diff", index=False)
+        build_params_table().to_excel(writer, sheet_name="Parameters", index=False)
+
+
+def acquire_with_auto_range(query):
+    """Acquire PUND data using the shared automatic fixed-range helper."""
+    def acquire_once(ranges):
+        current_ranges = {CH1: ranges["Irange1"], CH2: ranges["Irange2"]}
+        execute_segARB_test(
+            query,
+            [CH1, CH2],
+            make_pund_seq_configs(),
+            current_ranges=current_ranges,
+        )
+        df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
+        power_off_outputs(query, (CH1, CH2))
+        if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
+            raise ValueError("PUND returned empty channel data during range check.")
+        return df_ch1, df_ch2
+
+    result, final_ranges, _assessments = acquire_with_auto_current_range(
+        acquire_once,
+        {
+            "Irange1": params["Irange1"],
+            "Irange2": params["Irange2"],
+        },
+        {
+            "Irange1": lambda data: data[0][f"Current {CH1}"].to_numpy(),
+            "Irange2": lambda data: data[1][f"Current {CH2}"].to_numpy(),
+        },
+        labels={"Irange1": "I1", "Irange2": "I2"},
+        test_name="PUND",
+    )
+    params.update(final_ranges)
+    return result
 
 
 def analyze_pund_edge_diff(df_ch1, df_ch2):
@@ -270,22 +322,14 @@ def analyze_pund_edge_diff(df_ch1, df_ch2):
 
 def main():
     """Run the PUND measurement and save raw/analysis files."""
-    fname_base = build_fname_base()
     with PMUSession(INST, channels=(CH1, CH2)) as session:
         Q = session.query
         print("Running PUND...")
-        seq_configs = make_pund_seq_configs()
-        current_ranges = {CH1: params["Irange1"], CH2: params["Irange2"]}
-        execute_segARB_test(Q, [CH1, CH2], seq_configs, current_ranges=current_ranges)
-        df_ch1, df_ch2 = read_both_channels(Q, CH1, CH2)
-        power_off_outputs(Q, (CH1, CH2))
-        if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
-            raise ValueError("PUND returned empty channel data.")
+        df_ch1, df_ch2 = acquire_with_auto_range(Q)
+        fname_base = build_fname_base()
 
         data = analyze_pund_edge_diff(df_ch1, df_ch2)
-        save_channels_separate_excel({1: df_ch1, 2: df_ch2}, f"{fname_base}_raw.xlsx")
-        data["df_total"].to_excel(f"{fname_base}_total.xlsx", index=False)
-        data["pund_diff"].to_excel(f"{fname_base}_diff.xlsx", index=False)
+        save_pund_workbook(f"{fname_base}.xlsx", df_ch1, df_ch2, data)
 
         fig_i2, ax_i2 = plt.subplots(figsize=(7, 5))
         for seg in ["P-U", "N-D"]:

@@ -25,8 +25,8 @@ CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e7,
-    "ENABLE_LLEC": True,
+    "LOAD_RESISTANCE": 1e6,
+    "ENABLE_LLEC": False,
 }
 
 
@@ -44,7 +44,7 @@ READ_DWELL = 1e-5
 WRITE_POSITIVE_SEQ_ID = 1
 WRITE_NEGATIVE_SEQ_ID = 2
 MAX_SEGMENTS_PER_SEQ = 10000
-PREVIEW_ONLY = False
+PREVIEW_ONLY = True
 
 
 # Shared clock definition for each sequence.
@@ -139,6 +139,57 @@ def preview_waveform(output_path=None):
         title_prefix="FTJ ISPP V2 CH1",
     )
 
+
+def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, add_gap=True):
+    """Append t-V endpoint pairs for one waveform block."""
+    cursor = start_time
+    for segment_start_v, segment_stop_v, segment_time in zip(start_v, stop_v, time_values):
+        next_cursor = cursor + segment_time
+        points.append((cursor, segment_start_v))
+        points.append((next_cursor, segment_stop_v))
+        cursor = next_cursor
+    if add_gap:
+        points.append((None, None))
+    return cursor
+
+
+def build_waveform_trace_table():
+    """Return one wide t-V table for plotting ISPP write and read waveforms."""
+    write_points = []
+    read_points = []
+    cursor = 0.0
+
+    for voltages in (POS_VOLTAGES, NEG_VOLTAGES):
+        for voltage in voltages:
+            write_start_v = [0.0, 0.0, voltage, voltage, 0]
+            write_stop_v = [0.0, voltage, voltage, 0.0, 0]
+            cursor = _extend_trace_points(
+                write_points,
+                write_start_v,
+                write_stop_v,
+                time_values_write,
+                cursor,
+            )
+
+            read_start_v = [0.0, 0.0, READ_V, READ_V, 0]
+            read_stop_v = [0.0, READ_V, READ_V, 0.0, 0]
+            cursor = _extend_trace_points(
+                read_points,
+                read_start_v,
+                read_stop_v,
+                time_values_read,
+                cursor,
+            )
+
+    trace_columns = {
+        "Time_Write_s": [time for time, _voltage in write_points],
+        "Voltage_Write_V": [voltage for _time, voltage in write_points],
+        "Time_Read_s": [time for time, _voltage in read_points],
+        "Voltage_Read_V": [voltage for _time, voltage in read_points],
+    }
+    return pd.DataFrame({name: pd.Series(values) for name, values in trace_columns.items()})
+
+
 def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
     """Run the FTJ segARB sequence list and optionally save raw data."""
     with PMUSession(INST, channels=(CH1, CH2)) as session:
@@ -158,6 +209,7 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
     if df_ch1 is None and df_ch2 is None:
         raise ValueError("No data returned from the FTJ segARB run.")
 
+    waveform_df = build_waveform_trace_table()
     output_path = None
     if save_results:
         save_dir = Path(save_dir)
@@ -178,11 +230,13 @@ def run_ftj_test(*, save_results=True, save_dir=SAVE_DIR, file_stem=FILE_STEM):
                 df_ch1.to_excel(writer, sheet_name="Channel_1", index=False)
             if df_ch2 is not None and not df_ch2.empty:
                 df_ch2.to_excel(writer, sheet_name="Channel_2", index=False)
+            waveform_df.to_excel(writer, sheet_name="Waveform", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
 
     return {
         "df_ch1": df_ch1,
         "df_ch2": df_ch2,
+        "waveform_df": waveform_df,
         "output_path": output_path,
     }
 
