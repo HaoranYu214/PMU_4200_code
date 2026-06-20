@@ -1,5 +1,28 @@
 # -*- coding: utf-8 -*-
-"""External loop endurance runner for FTJ scripts."""
+"""Generic external-loop runner for FTJ test scripts.
+
+Despite the filename, this module does not define a dedicated endurance
+waveform. It dynamically loads ``TARGET_SCRIPT_NAME`` and calls that module's
+``run_ftj_test(...)`` function ``LOOP_COUNT`` times.
+
+Any target FTJ script can be used if it provides this compatible interface:
+
+    run_ftj_test(
+        save_results=True,
+        save_dir=...,
+        file_stem=...,
+    ) -> dict containing ``output_path``
+
+Typical interpretation depends on the selected target:
+    ftj_Identical.py -> identical-pulse endurance
+    ftj_ISPP_V1/V2.py -> repeated incremental programming trajectories
+    ftj_PWM.py -> repeated pulse-width experiment
+    ftj_MRD.py -> repeated multilevel resistance-distribution experiment
+
+The external Python loop avoids putting thousands of repetitions into one PMU
+sequence list. Each run is saved separately, while a live CSV records status,
+duration, output path, and errors.
+"""
 
 from datetime import datetime
 import importlib.util
@@ -13,7 +36,7 @@ if str(PKG_ROOT) not in sys.path:
 
 import pandas as pd
 
-TARGET_SCRIPT_NAME = "1C_ftj_Identical.py"
+TARGET_SCRIPT_NAME = "ftj_Identical.py"
 FTJ_SCRIPT = Path(__file__).with_name(TARGET_SCRIPT_NAME)
 SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ_endurance")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)

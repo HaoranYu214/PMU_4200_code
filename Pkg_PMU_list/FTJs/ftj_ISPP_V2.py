@@ -1,5 +1,40 @@
 # -*- coding: utf-8 -*-
-"""FTJ ISPP V2 script."""
+"""FTJ ISPP V2: pack each voltage ladder into one long sequence.
+
+ISPP means Incremental Step Pulse Programming:
+    the write-pulse amplitude is increased step by step, and a low-voltage
+    read pulse checks the FTJ state after every write.
+
+Physical purpose:
+    Use incrementally stronger programming pulses to produce controlled,
+    gradual state updates and a more nearly linear resistance/conductance
+    trajectory. The increasing amplitude compensates for the nonlinear FTJ
+    response that often makes identical fixed-amplitude pulses ineffective at
+    first and excessively strong later.
+
+    Cycle-to-cycle variation can be studied by repeating the complete
+    staircase, but that is an optional analysis rather than the definition or
+    primary purpose of ISPP.
+
+Execution pattern:
+    positive sequence: write(V1) -> read -> write(V2) -> read -> ...
+    negative sequence: write(-V1) -> read -> write(-V2) -> read -> ...
+
+Difference from V1:
+    V2 uses only two sequence IDs: one for the complete positive ladder and
+    one for the complete negative ladder. The number of sequence IDs therefore
+    stays small, while the number of segments inside each sequence grows with
+    the number of voltage steps.
+
+    V1 instead creates a separate sequence for every write-voltage step and
+    alternates those sequences with one reusable read sequence. V1 is easier
+    to reorder through SEQ_LIST, but consumes many more sequence IDs.
+
+Current measurement choice:
+    This V2 configuration measures both write and read dwell segments.
+    Use it when write-current information is wanted and the combined sequence
+    remains below MAX_SEGMENTS_PER_SEQ.
+"""
 
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +52,8 @@ from debug.waveform_preview import preview_sequence_configs
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\Test")
+# SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ endurance")
+SAVE_DIR = Path(r"D:\Code\data\20260620")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_ispp_v2"
 

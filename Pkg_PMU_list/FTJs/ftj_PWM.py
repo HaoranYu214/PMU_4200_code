@@ -1,5 +1,32 @@
 # -*- coding: utf-8 -*-
-"""FTJ PWM script."""
+"""FTJ pulse-width-modulation (PWM) experiment using pulse-count emulation.
+
+Intended physical purpose:
+    Study how programming dose/effective pulse duration controls the FTJ state.
+    A true pulse-width measurement would keep voltage fixed, vary the dwell
+    time of one write pulse, and read the resistance after each width.
+
+Important implementation detail:
+    This script does not actually sweep the width of an individual pulse.
+    ``WRITE_POSITIVE_DWELL`` and ``WRITE_NEGATIVE_DWELL`` remain fixed.
+    Instead, it approximates increasing programming duration by applying a
+    growing number of identical fixed-width write pulses before each read:
+
+        write x 1   -> read
+        write x 2   -> read
+        write x 5   -> read
+        ...
+        write x 100 -> read
+
+    ``COUNT_RULE`` and ``CUSTOM_COUNTS`` control these pulse counts. Therefore
+    the programmed variable in the current implementation is accumulated pulse
+    count/dose, not true single-pulse width.
+
+Interpretation caution:
+    Several separated pulses are not always equivalent to one continuous pulse
+    with the same total on-time. Relaxation during ``WRITE_*_IDLE`` and repeated
+    rise/fall edges can produce different switching behavior.
+"""
 
 from datetime import datetime
 from pathlib import Path

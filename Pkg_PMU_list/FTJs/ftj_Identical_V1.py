@@ -1,5 +1,23 @@
 # -*- coding: utf-8 -*-
-"""FTJ identical-pulse script with fixed write/read levels."""
+"""FTJ identical-pulse test with fixed write and read levels.
+
+Physical purpose:
+    Apply the same write pulse repeatedly and read the FTJ state after every
+    pulse. Unlike ISPP, the write amplitude does not increase. The changing
+    variable is cumulative pulse count.
+
+    This reveals pulse-to-pulse evolution at fixed programming conditions:
+    gradual resistance change, switching probability, saturation, and the
+    number of identical pulses required to reach a target state. Because the
+    FTJ response is nonlinear, identical pulses may initially cause little
+    change and then produce an abrupt jump or rapid saturation.
+
+Difference from ISPP (Incremental Step Pulse Programming):
+    ISPP increases write amplitude step by step to make resistance/conductance
+    updates more controlled and approximately linear. Identical-pulse testing
+    keeps amplitude fixed and exposes the device's nonlinear accumulation
+    versus pulse number.
+"""
 
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +36,8 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\11-06-2026\03D2\L40um1\FTJ\Identical")
+# SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ endurance")
+SAVE_DIR = Path(r"D:\Code\data\20260620")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_identical"
 
@@ -49,7 +68,7 @@ WRITE_NEGATIVE_IDLE = 0.1
 READ_IDLE = 1e-3
 
 
-PREVIEW_ONLY = False
+PREVIEW_ONLY = True
 SAVE_WAVEFORM_PREVIEW = False
 
 WRITE_POSITIVE_SEQ_ID = 1

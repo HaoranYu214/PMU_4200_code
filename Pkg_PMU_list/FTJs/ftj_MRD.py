@@ -1,6 +1,34 @@
-## FTJ Multilevel Resistance Distribution Measurement
 # -*- coding: utf-8 -*-
-"""FTJ multilevel resistance distribution measurement."""
+"""FTJ multilevel resistance distribution (MRD) measurement.
+
+MRD means Multilevel Resistance Distribution.
+
+Physical purpose:
+    Evaluate FTJ reliability and cycle-to-cycle (C2C) variation. For each
+    fixed write-voltage level, repeat the same reset/read/write/read cycle and
+    measure how much the resulting resistance varies from trial to trial.
+
+    The mean or median indicates the resistance level produced by a given
+    programming voltage, while the standard deviation and full distribution
+    quantify repeatability, state overlap, and programming reliability.
+
+Important implementation detail:
+    This script does not sweep write-pulse width. ``WRITE_DWELL`` is fixed.
+    The programmed variable is ``WRITE_VOLTAGES``.
+
+    It also does not wait for several accumulated write pulses before reading.
+    Every cycle currently performs:
+
+        reference/reset pulse
+        -> reference-state read
+        -> one write pulse at the selected voltage
+        -> after-write read
+
+    That four-pulse block is repeated ``CYCLES_PER_LEVEL`` times for every
+    write voltage. Therefore the distribution comes from repeated, individually
+    read trials at each voltage level, rather than from pulse-width modulation
+    or sparse reading after every N programming pulses.
+"""
 
 from datetime import datetime
 from pathlib import Path

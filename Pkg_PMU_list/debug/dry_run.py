@@ -151,7 +151,7 @@ def install_dry_run_hooks(no_save=False):
             self._state = state
             self.client = SharedDryRunCommunications(instrument_resource)
 
-    def fake_read_both_channels(_query, ch1, ch2, debug=False):
+    def fake_read_both_channels(_query, ch1, ch2, debug=False, pulse_iv=None):
         import pandas as pd
 
         df1 = pd.DataFrame(

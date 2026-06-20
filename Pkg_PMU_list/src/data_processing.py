@@ -9,7 +9,29 @@ import locale
 import csv
 
 
-def read_channel_data(Q, ch, block=2048, debug=False):
+def _channel_data_columns(ch, field_count, pulse_iv=None):
+    """Return columns for waveform/segARB or pulse-I-V records."""
+    standard = [f"Voltage {ch}", f"Current {ch}", f"Timestamp {ch}", f"Status {ch}"]
+    if field_count == 8:
+        return [
+            f"Voltage High {ch}", f"Current High {ch}",
+            f"Timestamp High {ch}", f"Status High {ch}",
+            f"Voltage Low {ch}", f"Current Low {ch}",
+            f"Timestamp Low {ch}", f"Status Low {ch}",
+        ]
+    if field_count != 4:
+        raise ValueError(
+            f"CH{ch} returned {field_count} values per point; expected 4 or 8."
+        )
+    if pulse_iv == (False, True):
+        return [
+            f"Voltage Low {ch}", f"Current Low {ch}",
+            f"Timestamp Low {ch}", f"Status Low {ch}",
+        ]
+    return standard
+
+
+def read_channel_data(Q, ch, block=2048, debug=False, pulse_iv=None):
     """按块读取单通道，返回 [Voltage ch, Current ch, Timestamp ch, Status ch]；无数据返回 None。
     
     debug=True 时打印原始响应的前几个数据点，用于检查精度问题。
@@ -20,8 +42,15 @@ def read_channel_data(Q, ch, block=2048, debug=False):
     if debug:
         print(f"🔍 [DEBUG] CH{ch} 数据点数: {count}")
     
-    cols = [f'Voltage {ch}', f'Current {ch}', f'Timestamp {ch}', f'Status {ch}']
-    df = pd.DataFrame(columns=cols)
+    if pulse_iv is not None:
+        if len(pulse_iv) != 2:
+            raise ValueError("pulse_iv must be (acquire_high, acquire_low).")
+        pulse_iv = tuple(bool(value) for value in pulse_iv)
+        if pulse_iv == (False, False):
+            raise ValueError("Pulse I-V must acquire at least High or Low data.")
+
+    cols = None
+    chunks = []
     for start in range(0, count, block):
         resp = Q(f":PMU:DATA:GET {ch}, {start}, {block}")
         if not resp:
@@ -38,13 +67,31 @@ def read_channel_data(Q, ch, block=2048, debug=False):
         rows = [seg.split(",") for seg in resp.split(";") if seg.strip()]
         if not rows:
             continue
-        df_chunk = pd.DataFrame(rows, columns=cols)
-        df = pd.concat([df, df_chunk], ignore_index=True)
+        field_counts = {len(row) for row in rows}
+        if len(field_counts) != 1:
+            raise ValueError(
+                f"CH{ch} returned inconsistent record widths: {sorted(field_counts)}."
+            )
+        chunk_cols = _channel_data_columns(ch, field_counts.pop(), pulse_iv=pulse_iv)
+        if cols is None:
+            cols = chunk_cols
+        elif cols != chunk_cols:
+            raise ValueError(f"CH{ch} data layout changed while reading blocks.")
+        chunks.append(pd.DataFrame(rows, columns=cols))
     
-    if df.empty:
+    if not chunks:
         return None
     
-    result = df.astype({f'Voltage {ch}': float, f'Current {ch}': float, f'Timestamp {ch}': float}).reset_index(drop=True)
+    result = pd.concat(chunks, ignore_index=True)
+    numeric_columns = [
+        column for column in result.columns
+        if column.startswith(("Voltage ", "Current ", "Timestamp "))
+    ]
+    result[numeric_columns] = result[numeric_columns].astype(float)
+    result = result.reset_index(drop=True)
+    if pulse_iv is not None:
+        result.attrs["pulse_iv_acquire_high"] = pulse_iv[0]
+        result.attrs["pulse_iv_acquire_low"] = pulse_iv[1]
     
     if debug:
         print(f"🔍 [DEBUG] CH{ch} 解析后前3行:\n{result.head(3).to_string()}")
@@ -52,11 +99,48 @@ def read_channel_data(Q, ch, block=2048, debug=False):
     return result
 
 
-def read_both_channels(Q, ch1, ch2, debug=False):
+def read_both_channels(Q, ch1, ch2, debug=False, pulse_iv=None):
     """读取双通道数据（若某通道无数据返回 None）"""
-    df1 = read_channel_data(Q, ch1, debug=debug)
-    df2 = read_channel_data(Q, ch2, debug=debug)
+    df1 = read_channel_data(Q, ch1, debug=debug, pulse_iv=pulse_iv)
+    df2 = read_channel_data(Q, ch2, debug=debug, pulse_iv=pulse_iv)
     return df1, df2
+
+
+def select_pulse_iv_level(df, ch, level="High"):
+    """Return one pulse-I-V level using the standard four-column schema."""
+    if df is None or df.empty:
+        return df
+    level = level.title()
+    if level not in ("High", "Low"):
+        raise ValueError("level must be 'High' or 'Low'.")
+
+    source_columns = [
+        f"Voltage {level} {ch}",
+        f"Current {level} {ch}",
+        f"Timestamp {level} {ch}",
+        f"Status {level} {ch}",
+    ]
+    if all(column in df.columns for column in source_columns):
+        result = df[source_columns].copy()
+        result.columns = [
+            f"Voltage {ch}",
+            f"Current {ch}",
+            f"Timestamp {ch}",
+            f"Status {ch}",
+        ]
+        result.attrs.update(df.attrs)
+        result.attrs["pulse_iv_selected_level"] = level
+        return result
+
+    standard_columns = [
+        f"Voltage {ch}",
+        f"Current {ch}",
+        f"Timestamp {ch}",
+        f"Status {ch}",
+    ]
+    if all(column in df.columns for column in standard_columns):
+        return df.copy()
+    raise ValueError(f"CH{ch} does not contain {level} pulse-I-V data.")
 
 
 def merge_channels(dfs: dict):

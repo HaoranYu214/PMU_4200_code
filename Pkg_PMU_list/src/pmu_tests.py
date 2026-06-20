@@ -205,6 +205,17 @@ def _get_mode_num(mode):
     return mode_map[mode.upper()] if isinstance(mode, str) else mode_map[mode]
 
 
+def _configure_pulse_iv_acquisition(Q, channels, params):
+    """Configure High/Low data returned by spot pulse-I-V modes."""
+    acquire_high = bool(params.get("ACQUIRE_HIGH", True))
+    acquire_low = bool(params.get("ACQUIRE_LOW", False))
+    if not acquire_high and not acquire_low:
+        raise ValueError("At least one of ACQUIRE_HIGH or ACQUIRE_LOW must be enabled.")
+    for ch in channels:
+        Q(f":PMU:MEASURE:PIV {ch}, {int(acquire_high)}, {int(acquire_low)}")
+    return acquire_high, acquire_low
+
+
 def dual_channel_pulse_train(Q, CH1, CH2, p, mode='D'):
     """双通道脉冲训练测试"""
     mode_num = _get_mode_num(mode)
@@ -226,8 +237,7 @@ def dual_channel_pulse_train(Q, CH1, CH2, p, mode='D'):
 
     Q(f":PMU:MEASURE:MODE {mode_num}")
     if mode_num in [1, 3]:
-        Q(f":PMU:MEASURE:PIV {CH1}, 1, 0")
-        Q(f":PMU:MEASURE:PIV {CH2}, 1, 0")
+        _configure_pulse_iv_acquisition(Q, (CH1, CH2), p)
         Q(f":PMU:TIMES:PIV {CH1}, {p['MEASURE_START_D']}, {p['MEASURE_STOP_D']}")
         Q(f":PMU:TIMES:PIV {CH2}, {p['MEASURE_START_D']}, {p['MEASURE_STOP_D']}")
     elif mode_num in [2, 4]:
@@ -267,8 +277,7 @@ def dual_channel_sweep_train(Q, CH1, CH2, p, mode='D'):
     
     Q(f":PMU:MEASURE:MODE {mode_num}")
     if mode_num in [1, 3]:
-        Q(f":PMU:MEASURE:PIV {CH1}, 1, 0")
-        Q(f":PMU:MEASURE:PIV {CH2}, 1, 0")
+        _configure_pulse_iv_acquisition(Q, (CH1, CH2), p)
         Q(f":PMU:TIMES:PIV {CH1}, {p['MEASURE_START_D']}, {p['MEASURE_STOP_D']}")
         Q(f":PMU:TIMES:PIV {CH2}, {p['MEASURE_START_D']}, {p['MEASURE_STOP_D']}")
     elif mode_num in [2, 4]:

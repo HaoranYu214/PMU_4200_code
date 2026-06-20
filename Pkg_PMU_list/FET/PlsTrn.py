@@ -8,7 +8,13 @@ PKG_ROOT = Path(__file__).resolve().parents[1]
 if str(PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(PKG_ROOT))
 
-from src.data_processing import add_resistance_columns, merge_channels, read_both_channels, save_channels_separate_excel
+from src.data_processing import (
+    add_resistance_columns,
+    merge_channels,
+    read_both_channels,
+    save_channels_separate_excel,
+    select_pulse_iv_level,
+)
 from src.plotting_utils import PlotManager, plot_time_series
 from src.pmu_tests import dual_channel_pulse_train, power_off_outputs
 from src.session import PMUSession
@@ -31,6 +37,8 @@ params = dict(
     CH2_DELAY=1050e-6,
     CH2_RANGE=1e-4,
     PULSE_COUNT=100,
+    ACQUIRE_HIGH=True,
+    ACQUIRE_LOW=False,
     MEASURE_START_D=0.6,
     MEASURE_STOP_D=0.8,
     MEASURE_START_W=0.2,
@@ -56,14 +64,24 @@ with PMUSession(INST, channels=(CH1, CH2)) as session:
     Q = session.query
     print("Running pulse train...")
     dual_channel_pulse_train(Q, CH1, CH2, params, mode=TEST_MODE)
-    df1, df2 = read_both_channels(Q, CH1, CH2)
+    df1, df2 = read_both_channels(
+        Q,
+        CH1,
+        CH2,
+        pulse_iv=(params["ACQUIRE_HIGH"], params["ACQUIRE_LOW"]),
+    )
     power_off_outputs(Q, (CH1, CH2))
     if df1 is None or df2 is None or df1.empty or df2.empty:
         raise ValueError("Pulse train returned empty channel data.")
 
     dfs = {1: df1, 2: df2}
+    selected_level = "High" if params["ACQUIRE_HIGH"] else "Low"
+    analysis_dfs = {
+        1: select_pulse_iv_level(df1, CH1, selected_level),
+        2: select_pulse_iv_level(df2, CH2, selected_level),
+    }
     merged = add_resistance_columns(
-        merge_channels(dfs),
+        merge_channels(analysis_dfs),
         eps=params.get("CURRENT_EPS", 1e-12),
         res_min=params.get("RES_MIN", 1.0),
         res_max=params.get("RES_MAX", 1e15),
