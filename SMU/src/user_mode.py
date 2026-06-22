@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from .data_processing import parse_kxci_reading
+
 
 def initialize_user_mode(query):
+    query("EM 1,0")
     query("BC")
     query("*RST")
     query("US")
@@ -20,11 +23,13 @@ def source_current(query, channel, current, voltage_compliance, *, range_code=0)
 
 
 def measure_current(query, channel):
-    return float(query(f"TI{channel}"))
+    value, _status = parse_kxci_reading(query(f"TI{channel}"))
+    return value
 
 
 def measure_voltage(query, channel):
-    return float(query(f"TV{channel}"))
+    value, _status = parse_kxci_reading(query(f"TV{channel}"))
+    return value
 
 
 def power_off_voltage_source(query, channel):

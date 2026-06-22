@@ -4,4 +4,6 @@ Scripts in this folder keep experiment parameters near the top while reusing
 connection, command, execution, and data helpers from `SMU/src`.
 
 - `linear_voltage_sweep.py`: System Mode two-channel voltage sweep.
+- `segmented_voltage_sweep.py`: arbitrary turning-point path such as
+  `0 -> V1 -> 0 -> V2 -> 0`.
 - `user_mode_spot.py`: User Mode source-voltage/measure-current spot test.
