@@ -36,26 +36,26 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-# SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ endurance")
-SAVE_DIR = Path(r"D:\Code\data\20260620")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um5\Identical")
+# SAVE_DIR = Path(r"D:\Code\data\20260620")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_identical"
 
-CURRENT_RANGES = {CH1: 1e-4, CH2: 1e-4}
+CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1,
+    "LOAD_RESISTANCE": 1e3,
     "ENABLE_LLEC": False,
 }
 
 
-WRITE_POSITIVE_V = 1.5
-READ_V = -1
+WRITE_POSITIVE_V = 0.7
+READ_V = -1.2
 REVERSE_READ_V = -READ_V
-WRITE_NEGATIVE_V = -8
+WRITE_NEGATIVE_V = -5
 
-WRITE_POSITIVE_DWELL = 1e-4
+WRITE_POSITIVE_DWELL = 5e-5
 READ_DWELL = 5e-5
 WRITE_NEGATIVE_DWELL = 5e-5
 
@@ -63,12 +63,12 @@ WRITE_POSITIVE_TRF = 1e-6
 WRITE_NEGATIVE_TRF = 1e-6
 READ_TRF = 1e-6
 
-WRITE_POSITIVE_IDLE = 0.1
-WRITE_NEGATIVE_IDLE = 0.1
-READ_IDLE = 1e-3
+WRITE_POSITIVE_IDLE = 0.5
+WRITE_NEGATIVE_IDLE = 0.5
+READ_IDLE = 0.5
 
 
-PREVIEW_ONLY = True
+PREVIEW_ONLY = False
 SAVE_WAVEFORM_PREVIEW = False
 
 WRITE_POSITIVE_SEQ_ID = 1
@@ -76,8 +76,8 @@ READ_SEQ_ID = 2
 WRITE_NEGATIVE_SEQ_ID = 3
 REVERSE_READ_SEQ_ID = 4
 
-POSITIVE_REPEAT_COUNT = 40
-NEGATIVE_REPEAT_COUNT = 40
+POSITIVE_REPEAT_COUNT = 50
+NEGATIVE_REPEAT_COUNT = 50
 
 
 time_values_write_positive = [WRITE_POSITIVE_TRF, WRITE_POSITIVE_DWELL, WRITE_POSITIVE_TRF, WRITE_POSITIVE_IDLE]
@@ -87,15 +87,15 @@ time_values_write_negative = [WRITE_NEGATIVE_TRF, WRITE_NEGATIVE_DWELL, WRITE_NE
 # Measurement start/stop are absolute offsets in seconds within each segment.
 meas_types_write_positive = [0, 0, 0, 0]
 meas_start_write_positive = [ 0.0, 0.0, 0.0, 0.0]
-meas_stop_write_positive = time_values_write_positive
+meas_stop_write_positive = [0.0, 0.0, 0.0, 0.0]
 
 meas_types_read = [0, 1, 0, 0]
-meas_start_read = [x * 0.5 for x in time_values_read]
-meas_stop_read = [x * 0.9 for x in time_values_read]
+meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
+meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
 
 meas_types_write_negative = [0, 0, 0, 0]
 meas_start_write_negative = [0.0, 0.0, 0.0, 0.0]
-meas_stop_write_negative = time_values_write_negative
+meas_stop_write_negative = [0.0, 0.0, 0.0, 0.0]
 
 ch1_start_v_write_positive = [0.0, WRITE_POSITIVE_V, WRITE_POSITIVE_V, 0]
 ch1_stop_v_write_positive = [WRITE_POSITIVE_V, WRITE_POSITIVE_V, 0.0, 0]
@@ -151,19 +151,59 @@ seq_configs = {
 # )
 
 
-SEQ_PLAN = (
-    [(WRITE_POSITIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT +
-    [(WRITE_NEGATIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT +
-    [(WRITE_POSITIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT +
-    [(WRITE_NEGATIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT +
+SEQ_CYCLE_COUNT = 2
+FIRST_EXPANDED_SEQ_ID = 1
+
+SINGLE_CYCLE_PLAN = (
     [(WRITE_POSITIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT +
     [(WRITE_NEGATIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT
 )
+SEQ_PLAN = SINGLE_CYCLE_PLAN * SEQ_CYCLE_COUNT
+
+
+def build_sequence_plan_config(configs, seq_plan, *, seq_id):
+    """Flatten a sequence-list plan into one PMU sequence."""
+    config_by_id = {config[0]: config for config in configs}
+    start_v = []
+    stop_v = []
+    time_values = []
+    meas_types = []
+    meas_start = []
+    meas_stop = []
+
+    for plan_seq_id, repeat_count in seq_plan:
+        config = config_by_id[plan_seq_id]
+        for _ in range(repeat_count):
+            start_v.extend(config[1])
+            stop_v.extend(config[2])
+            time_values.extend(config[3])
+            meas_types.extend(config[4])
+            meas_start.extend(config[5])
+            meas_stop.extend(config[6])
+
+    return (seq_id, start_v, stop_v, time_values, meas_types, meas_start, meas_stop)
+
+
+base_seq_configs = seq_configs
+expanded_seq_ids = [FIRST_EXPANDED_SEQ_ID + index for index in range(SEQ_CYCLE_COUNT)]
+ch1_expanded_configs = [
+    build_sequence_plan_config(base_seq_configs[CH1], SINGLE_CYCLE_PLAN, seq_id=seq_id)
+    for seq_id in expanded_seq_ids
+]
+ch2_expanded_configs = [
+    build_sequence_plan_config(base_seq_configs[CH2], SINGLE_CYCLE_PLAN, seq_id=seq_id)
+    for seq_id in expanded_seq_ids
+]
+
+seq_configs = {
+    CH1: ch1_expanded_configs,
+    CH2: ch2_expanded_configs,
+}
 
 
 SEQ_LIST = {
-    CH1: SEQ_PLAN,
-    CH2: SEQ_PLAN,
+    CH1: [(seq_id, 1) for seq_id in expanded_seq_ids],
+    CH2: [(seq_id, 1) for seq_id in expanded_seq_ids],
 }
 
 
@@ -222,7 +262,7 @@ def build_sequence_plan_preview_config(configs, seq_plan, *, seq_id=0):
 
 
 ch1_sequence_plan_preview_config = build_sequence_plan_preview_config(
-    seq_configs[CH1],
+    base_seq_configs[CH1],
     SEQ_PLAN,
     seq_id=0,
 )
@@ -252,7 +292,7 @@ def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, ad
 
 def build_waveform_trace_table():
     """Return one wide t-V table for plotting write/read command waveforms."""
-    config_by_id = {config[0]: config for config in seq_configs[CH1]}
+    config_by_id = {config[0]: config for config in base_seq_configs[CH1]}
     write_points = []
     read_points = []
     reverse_read_points = []

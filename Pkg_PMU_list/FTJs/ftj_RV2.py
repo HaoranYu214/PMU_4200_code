@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """FTJ RV script with one prepost sequence and one full write+read scan sequence."""
+"""从+VP开始测试, 到-Vp然后回到VP"""
 
 from datetime import datetime
 from pathlib import Path
@@ -18,74 +19,72 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\03C6\20um circle_1\FTJ\RV")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um5\RV2")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_rv"
 
-CURRENT_RANGES = {CH1: 1e-4, CH2: 1e-4}
+CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1,
+    "LOAD_RESISTANCE": 1e6,
     "ENABLE_LLEC": False,
 }
 
 OFFSET_V = -2
-VP = 6
+VP = 4
 WRITE_LEVEL_STEP = 0.2
 READ = -1
 READ_LEVEL = READ-OFFSET_V
-PREPOST_LEVEL = -VP
+PREPOST_LEVEL =  - VP
 SCAN_CYCLES = 1
 
-PREPOST_DWELL = 1e-3
+PREPOST_DWELL = 5e-5
 WRITE_DWELL = 5e-5
 READ_DWELL = 5e-5
 
-PREPOST_IDLE_1 = 5e-3
-PREPOST_RISE = 1e-4
-PREPOST_FALL = 1e-4
-PREPOST_IDLE_2 = 0.1
+PREPOST_RISE = 1e-5
+PREPOST_FALL = 1e-5
+PREPOST_IDLE_2 = 0.5
 
-WRITE_IDLE_1 = 1e-3
-WRITE_RISE = 1e-4
-WRITE_FALL = 1e-4
-WRITE_IDLE_2 = 0.1
+WRITE_RISE = 1e-5
+WRITE_FALL = 1e-5
+WRITE_IDLE_2 = 0.5
 
-READ_IDLE_1 = 1e-3
-READ_RISE = 1e-4
-READ_FALL = 1e-4
-READ_IDLE_2 = 0.1
+READ_RISE = 1e-5
+READ_FALL = 1e-5
+READ_IDLE_2 = 1e-3
 
 PREPOST_SEQ_ID = 1
 FIRST_SCAN_SEQ_ID = 2
-SEGMENTS_PER_SCAN_POINT = 10
+SEGMENTS_PER_SCAN_POINT = 8
 MAX_SEGMENTS_PER_SEQ = 1000
 
+# PREVIEW_ONLY = True
 PREVIEW_ONLY = False
 
-time_values_prepost = [PREPOST_IDLE_1, PREPOST_RISE, PREPOST_DWELL, PREPOST_FALL, PREPOST_IDLE_2]
-time_values_write = [WRITE_IDLE_1, WRITE_RISE, WRITE_DWELL, WRITE_FALL, WRITE_IDLE_2]
-time_values_read = [READ_IDLE_1, READ_RISE, READ_DWELL, READ_FALL, READ_IDLE_2]
+time_values_prepost = [PREPOST_RISE, PREPOST_DWELL, PREPOST_FALL, PREPOST_IDLE_2]
+time_values_write = [WRITE_RISE, WRITE_DWELL, WRITE_FALL, WRITE_IDLE_2]
+time_values_read = [READ_RISE, READ_DWELL, READ_FALL, READ_IDLE_2]
 
-meas_types_prepost = [0, 0, 0, 0, 0]
+meas_types_prepost = [0, 0, 0, 0]
 meas_start_prepost = [0.0] * len(time_values_prepost)
-meas_stop_prepost = time_values_prepost
+meas_stop_prepost = [0.0] * len(time_values_prepost)
 
-meas_types_write = [0, 0, 0, 0, 0]
+meas_types_write = [0, 0, 0, 0]
 meas_start_write = [0.0] * len(time_values_write)
-meas_stop_write = time_values_write
+meas_stop_write = [0.0] * len(time_values_write)
 
-meas_types_read = [0, 0, 1, 0, 0]
-meas_start_read = [0.0, 0.0, READ_DWELL * 0.5, 0.0, 0.0]
-meas_stop_read = [time_values_read[0], time_values_read[1], READ_DWELL * 0.9, time_values_read[3], time_values_read[4]]
+meas_types_read = [0, 1, 0, 0]
+meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
+meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
 
 
 def build_pulse_block(level, time_values):
-    """Return a 5-segment offset -> (offset + level) -> offset pulse block."""
+    """Return a 4-segment offset -> (offset + level) -> offset pulse block."""
     target_v = OFFSET_V + level
-    start_v = [OFFSET_V, OFFSET_V, target_v, target_v, OFFSET_V]
-    stop_v = [OFFSET_V, target_v, target_v, OFFSET_V, OFFSET_V]
+    start_v = [OFFSET_V, target_v, target_v, OFFSET_V]
+    stop_v = [target_v, target_v, OFFSET_V, OFFSET_V]
     return start_v, stop_v, list(time_values)
 
 

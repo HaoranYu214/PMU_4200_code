@@ -36,12 +36,12 @@ if str(PKG_ROOT) not in sys.path:
 
 import pandas as pd
 
-TARGET_SCRIPT_NAME = "ftj_Identical.py"
+TARGET_SCRIPT_NAME = "ftj_RV2.py"
 FTJ_SCRIPT = Path(__file__).with_name(TARGET_SCRIPT_NAME)
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ_endurance")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um5\endurance")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
-LOOP_COUNT = 3000
+LOOP_COUNT = 30
 SAVE_EVERY_RUN = True
 STOP_ON_ERROR = True
 FILE_STEM_PREFIX = "ftj_endurance"

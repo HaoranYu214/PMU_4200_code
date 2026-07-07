@@ -12,6 +12,7 @@ if str(SMU_ROOT) not in sys.path:
     sys.path.insert(0, str(SMU_ROOT))
 
 from src.data_processing import retrieve_variables, save_workbook
+from src.plotting import save_current_plots
 from src.session import SMUSession
 from src.system_mode import build_segmented_voltage_path, run_list_voltage_sweep
 
@@ -21,7 +22,7 @@ SWEEP_CHANNEL = 2
 BIAS_CHANNEL = 1
 
 # The instrument follows these turning points in order.
-V1 = 2.0
+V1 = 3
 V2 = -3.0
 TURNING_POINTS = [0.0, V1, 0.0, V2, 0.0]
 
@@ -33,10 +34,14 @@ PARAMS = {
     "sweep_current_compliance": 1e-3,
     "bias_voltage": 0.0,
     "bias_current_compliance": 1e-3,
+    # Numeric value sends RG after SM DM2. Use "auto" or None to keep defaults.
+    # Examples: 1e-12 with a preamp, 100e-9 without a preamp.
+    "sweep_current_range": 1e-9,
+    "bias_current_range": "auto",
     "hold_time": 0.0,
     "sweep_delay": 0.02,
     # IT1=Fast, IT2=Normal, IT3=Quiet.
-    "integration": "IT2",
+    "integration": "IT3",
     "timeout_s": 300.0,
 }
 
@@ -47,7 +52,7 @@ NAMES = {
     "bias_current": "I1",
 }
 
-SAVE_DIR = Path(r"D:\Code\data\SMU\IV")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\R20um3\DC")
 
 
 def main():
@@ -95,6 +100,17 @@ def main():
         **PARAMS,
     }
     save_workbook(output_path, data, saved_parameters)
+    try:
+        iv_path, log_path = save_current_plots(
+            data,
+            output_path,
+            voltage_column=NAMES["sweep_voltage"],
+            current_column=NAMES["sweep_current"],
+        )
+        print(f"Saved I-V plot: {iv_path.resolve()}")
+        print(f"Saved log(abs(I)) plot: {log_path.resolve()}")
+    except Exception as exc:
+        print(f"Warning: failed to save current plots: {exc}")
     print(f"Saved segmented SMU sweep: {output_path.resolve()}")
 
 

@@ -50,6 +50,21 @@ def configure_constant_current(query, channel, current, voltage_compliance):
     query(f"IC{channel}, {current}, {voltage_compliance}")
 
 
+def configure_current_range(query, channel, current_range):
+    """Set the lowest current measurement range for one SMU channel.
+
+    Use ``None`` or ``"auto"`` to leave the instrument in its default autorange
+    behavior. Numeric values send the System Mode ``RG`` command.
+    """
+    if current_range is None:
+        return
+    if isinstance(current_range, str):
+        if current_range.strip().lower() in ("auto", "default", ""):
+            return
+        current_range = float(current_range)
+    query(f"RG {channel}, {float(current_range):.12g}")
+
+
 def configure_linear_voltage_sweep(
     query,
     *,
@@ -168,9 +183,18 @@ def configure_timing(
     query(integration)
 
 
-def configure_measurement_list(query, variables, *, display_mode=2):
+def configure_measurement_list(
+    query,
+    variables,
+    *,
+    display_mode=2,
+    current_ranges=None,
+):
     variable_text = ", ".join(f"'{variable}'" for variable in variables)
     query(f"SM DM{display_mode}")
+    if current_ranges:
+        for channel, current_range in current_ranges:
+            configure_current_range(query, channel, current_range)
     query(f"LI {variable_text}")
 
 
@@ -218,6 +242,8 @@ def run_linear_voltage_sweep(
     sweep_current_compliance=1e-3,
     bias_voltage=0.0,
     bias_current_compliance=1e-3,
+    sweep_current_range=None,
+    bias_current_range=None,
     hold_time=0.0,
     sweep_delay=0.0,
     integration="IT1",
@@ -269,7 +295,14 @@ def run_linear_voltage_sweep(
             bias_current_name,
             bias_voltage_name,
         ]
-    configure_measurement_list(query, return_variables)
+    configure_measurement_list(
+        query,
+        return_variables,
+        current_ranges=[
+            (sweep_channel, sweep_current_range),
+            (bias_channel, bias_current_range),
+        ],
+    )
     execute_and_wait(query, execution_mode=1, timeout_s=timeout_s)
     return list(return_variables)
 
@@ -287,6 +320,8 @@ def run_list_voltage_sweep(
     sweep_current_compliance=1e-3,
     bias_voltage=0.0,
     bias_current_compliance=1e-3,
+    sweep_current_range=None,
+    bias_current_range=None,
     hold_time=0.0,
     sweep_delay=0.0,
     integration="IT1",
@@ -341,6 +376,13 @@ def run_list_voltage_sweep(
             bias_current_name,
             bias_voltage_name,
         ]
-    configure_measurement_list(query, return_variables)
+    configure_measurement_list(
+        query,
+        return_variables,
+        current_ranges=[
+            (sweep_channel, sweep_current_range),
+            (bias_channel, bias_current_range),
+        ],
+    )
     execute_and_wait(query, execution_mode=1, timeout_s=timeout_s)
     return list(return_variables)

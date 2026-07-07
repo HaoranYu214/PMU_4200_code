@@ -11,6 +11,7 @@ import pandas as pd
 _NUMBER_AT_END = re.compile(
     r"([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?)\s*$"
 )
+_READING_SEPARATOR = re.compile(r"[,\x0e]+")
 
 
 def parse_kxci_reading(token):
@@ -38,7 +39,10 @@ def retrieve_variable(query, variable):
         return [], []
     values = []
     statuses = []
-    for token in response.split(","):
+    for token in _READING_SEPARATOR.split(response):
+        token = token.strip()
+        if not token:
+            continue
         value, status = parse_kxci_reading(token)
         values.append(value)
         statuses.append(status)

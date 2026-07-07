@@ -51,8 +51,8 @@ from debug.waveform_preview import preview_sequence_configs
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-# SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\18-03-2026\D1\FTJ endurance")
-SAVE_DIR = Path(r"D:\Code\data\20260620")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\07-07-2026\FTJ")
+# SAVE_DIR = Path(r"D:\Code\data\20260620")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_ispp_v1"
 
@@ -60,7 +60,7 @@ CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e7,
+    "LOAD_RESISTANCE": 1e6,
     "ENABLE_LLEC": True,
 }
 
@@ -68,10 +68,10 @@ SEGARB_OPTIONS = {
 READ_V = 0.1
 POS_V_START = 0.5
 POS_V_STOP = 2.0
-POS_STEPS = 10
+POS_STEPS = 15
 NEG_V_START = -0.5
 NEG_V_STOP = -2.0
-NEG_STEPS = 10
+NEG_STEPS = 15
 
 WRITE_DWELL = 1e-6
 READ_DWELL = 1e-5

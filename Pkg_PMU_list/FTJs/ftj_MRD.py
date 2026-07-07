@@ -47,11 +47,11 @@ from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-05-2026\03C6\20um circle_1\FTJ\MRD")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um\FTJ")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_mrd"
 
-CURRENT_RANGES = {CH1: 1e-4, CH2: 1e-4}
+CURRENT_RANGES = {CH1: 1e-3, CH2: 1e-3}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
@@ -61,11 +61,11 @@ SEGARB_OPTIONS = {
 
 OFFSET_V = 0.0
 REFERENCE_V = -7
-# WRITE_VOLTAGES = [-2, -2.5, -3, -3.5, -4, -4.5, -5]
+# WRITE_VOLTAGES = [-2, -2.5, -3, -3.5, -4, -4.5, -5, -5.5, -6, -6.5, -7]
 # WRITE_VOLTAGES = [-0.5, -1, -1.5, -2, -2.5, -3, -3.5, -4, -4.5, -5]
-WRITE_VOLTAGES = [0.1, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4]
+WRITE_VOLTAGES = [0.1, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 7]
 READ_V = -2
-CYCLES_PER_LEVEL = 10
+CYCLES_PER_LEVEL = 1
 
 REFERENCE_IDLE_1 = 1e-3
 REFERENCE_RISE = 1e-6

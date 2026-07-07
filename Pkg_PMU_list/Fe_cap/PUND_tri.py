@@ -22,18 +22,18 @@ from src.session import PMUSession
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 params = dict(
-    rise_time=5e-6,
-    delay_time=1e-2,
-    Vp=6.5,
+    rise_time=5e-4,
+    delay_time=5e-4,
+    Vp=4.5,
     offset=0,
     # area_cm2=1.2567e-5,
-    # area_cm2=(35*1e-4)**2*3.14,
-    area_cm2=4e-6,
+    # area_cm2=(20*1e-4)**2*3.14,
+    area_cm2=(40*1e-4)**2,
     Irange1=1e-3,
     Irange2=1e-4,
 )
 
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\11-06-2026\03D2\L40um1\FE\freqency")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um5\FE")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEW_ONLY = False
 
