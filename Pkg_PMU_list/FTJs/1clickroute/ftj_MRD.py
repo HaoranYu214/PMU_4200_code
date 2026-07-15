@@ -44,48 +44,49 @@ from debug.waveform_preview import preview_sequence_configs
 from src.data_processing import read_both_channels
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
+from route_config import apply_route_config
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um6\MRD")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um\FTJ")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_mrd"
 
-CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
+CURRENT_RANGES = {CH1: 1e-3, CH2: 1e-3}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e6,
+    "LOAD_RESISTANCE": 1,
     "ENABLE_LLEC": False,
 }
 
-OFFSET_V = -1
-REFERENCE_V = -6.5
+OFFSET_V = 0.0
+REFERENCE_V = -7
 # WRITE_VOLTAGES = [-2, -2.5, -3, -3.5, -4, -4.5, -5, -5.5, -6, -6.5, -7]
 # WRITE_VOLTAGES = [-0.5, -1, -1.5, -2, -2.5, -3, -3.5, -4, -4.5, -5]
-WRITE_VOLTAGES = [0.1, 0.3, 0.5, 0.7, 0.9, 1.1, 1.3, 1.5, 2, 2.2, 2.4, 2.6, 2.8, 3]
-READ_V = -1
+WRITE_VOLTAGES = [0.1, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 7]
+READ_V = -2
 CYCLES_PER_LEVEL = 1
 
 REFERENCE_RISE = 1e-6
-REFERENCE_DWELL = 5e-3
+REFERENCE_DWELL = 1e-3
 REFERENCE_FALL = 1e-6
-REFERENCE_IDLE_2 = 0.5
+REFERENCE_IDLE_2 = 0.1
 
 WRITE_RISE = 1e-6
-WRITE_DWELL = 1e-5
+WRITE_DWELL = 5e-5
 WRITE_FALL = 1e-6
-WRITE_IDLE_2 = 0.5
+WRITE_IDLE_2 = 0.1
 
 READ_RISE = 1e-6
 READ_DWELL = 5e-5
 READ_FALL = 1e-6
-READ_IDLE_2 = 0.5
+READ_IDLE_2 = 0.1
+apply_route_config("mrd", globals())
 
 BASE_SEQ_ID = 1
 MAX_SEGMENTS_PER_SEQ = 1024
 
-# PREVIEW_ONLY = True
 PREVIEW_ONLY = False
 
 time_values_reference = [

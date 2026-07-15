@@ -16,28 +16,30 @@ from debug.waveform_preview import preview_sequence_configs
 from src.data_processing import read_both_channels
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
+from route_config import apply_route_config
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um6\RV2")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um5\RV2")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_rv"
 
-CURRENT_RANGES = {CH1: 1e-3, CH2: 1e-3}
+CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e3,
+    "LOAD_RESISTANCE": 1e6,
     "ENABLE_LLEC": False,
 }
 
 OFFSET_V = -2
-VP = 5
+VP = 4
 WRITE_LEVEL_STEP = 0.2
 READ = -1
+apply_route_config("rv2", globals())
 READ_LEVEL = READ-OFFSET_V
 PREPOST_LEVEL =  - VP
-SCAN_CYCLES = 1
+SCAN_CYCLES = globals().get("SCAN_CYCLES", 1)
 
 PREPOST_DWELL = 5e-5
 WRITE_DWELL = 5e-5
@@ -62,6 +64,10 @@ MAX_SEGMENTS_PER_SEQ = 1000
 
 # PREVIEW_ONLY = True
 PREVIEW_ONLY = False
+apply_route_config("rv2", globals())
+READ_LEVEL = READ-OFFSET_V
+PREPOST_LEVEL =  - VP
+SCAN_CYCLES = globals().get("SCAN_CYCLES", 1)
 
 time_values_prepost = [PREPOST_RISE, PREPOST_DWELL, PREPOST_FALL, PREPOST_IDLE_2]
 time_values_write = [WRITE_RISE, WRITE_DWELL, WRITE_FALL, WRITE_IDLE_2]
@@ -72,8 +78,8 @@ meas_start_prepost = [0.0] * len(time_values_prepost)
 meas_stop_prepost = [0.0] * len(time_values_prepost)
 
 meas_types_write = [0, 0, 0, 0]
-meas_start_write = [0.0, WRITE_DWELL* 0, 0.0, 0.0]
-meas_stop_write = [0.0, WRITE_DWELL * 1, 0.0, 0.0]
+meas_start_write = [0.0] * len(time_values_write)
+meas_stop_write = [0.0] * len(time_values_write)
 
 meas_types_read = [0, 1, 0, 0]
 meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]

@@ -27,11 +27,12 @@ from debug.waveform_preview import preview_sequence_configs
 from src.data_processing import read_both_channels
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
+from route_config import apply_route_config
 
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um6\PWM")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um5\PWM")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 FILE_STEM = "ftj_pwm"
 
@@ -43,14 +44,15 @@ SEGARB_OPTIONS = {
     "ENABLE_LLEC": True,
 }
 
-WRITE_POSITIVE_V = 2
+WRITE_POSITIVE_V = 6
 WRITE_NEGATIVE_V = -6
-READ_V = -1
+READ_V = -2
 
 WRITE_BASE_DWELL = 1e-6
 WIDTH_MULTIPLIERS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
+apply_route_config("pwm", globals())
 WRITE_WIDTHS = [WRITE_BASE_DWELL * multiplier for multiplier in WIDTH_MULTIPLIERS]
-PWM_REPEAT_COUNT = 5
+PWM_REPEAT_COUNT = int(globals().get("PWM_REPEAT_COUNT", 1))
 READ_DWELL = 5e-5
 
 WRITE_POSITIVE_TRF = 1e-6
@@ -66,6 +68,9 @@ MAX_SEGMENTS_PER_SEQ = 1000
 
 PREVIEW_ONLY = False
 SAVE_WAVEFORM_PREVIEW = False
+apply_route_config("pwm", globals())
+WRITE_WIDTHS = [WRITE_BASE_DWELL * multiplier for multiplier in WIDTH_MULTIPLIERS]
+PWM_REPEAT_COUNT = int(globals().get("PWM_REPEAT_COUNT", 1))
 
 meas_types_write = [0, 0, 0, 0]
 meas_start_write = [0.0, 0.0, 0.0, 0.0]
@@ -233,7 +238,6 @@ def expand_config_for_preview(config, repeat_count, *, seq_id=0):
     meas_types = []
     meas_start = []
     meas_stop = []
-
     for _ in range(repeat_count):
         start_v.extend(config[1])
         stop_v.extend(config[2])
@@ -241,7 +245,6 @@ def expand_config_for_preview(config, repeat_count, *, seq_id=0):
         meas_types.extend(config[4])
         meas_start.extend(config[5])
         meas_stop.extend(config[6])
-
     return (seq_id, start_v, stop_v, time_values, meas_types, meas_start, meas_stop)
 
 

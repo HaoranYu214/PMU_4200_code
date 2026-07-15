@@ -33,6 +33,7 @@ from src.data_processing import read_both_channels
 from debug.waveform_preview import preview_sequence_configs
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
+from route_config import apply_route_config
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
@@ -45,15 +46,15 @@ CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e6,
+    "LOAD_RESISTANCE": 1e3,
     "ENABLE_LLEC": False,
 }
 
 
-WRITE_POSITIVE_V = 2
-READ_V = -1
+WRITE_POSITIVE_V = 0.7
+READ_V = -1.2
 REVERSE_READ_V = -READ_V
-WRITE_NEGATIVE_V = -6
+WRITE_NEGATIVE_V = -5
 
 WRITE_POSITIVE_DWELL = 5e-5
 READ_DWELL = 5e-5
@@ -78,6 +79,8 @@ REVERSE_READ_SEQ_ID = 4
 
 POSITIVE_REPEAT_COUNT = 50
 NEGATIVE_REPEAT_COUNT = 50
+apply_route_config("identical", globals())
+REVERSE_READ_V = -READ_V
 
 
 time_values_write_positive = [WRITE_POSITIVE_TRF, WRITE_POSITIVE_DWELL, WRITE_POSITIVE_TRF, WRITE_POSITIVE_IDLE]
@@ -151,7 +154,7 @@ seq_configs = {
 # )
 
 
-SEQ_CYCLE_COUNT = 2
+SEQ_CYCLE_COUNT = globals().get("SEQ_CYCLE_COUNT", 2)
 FIRST_EXPANDED_SEQ_ID = 1
 
 SINGLE_CYCLE_PLAN = (
