@@ -2,18 +2,175 @@
 """NLS switch test helpers and standalone entrypoint."""
 
 from pathlib import Path
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+PKG_ROOT = Path(__file__).resolve().parents[1]
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
+
+from debug.waveform_preview import preview_sequence_configs
 from src.data_processing import calculate_polarization, read_both_channels
-from src.pmu_tests import hy_NISswitch_segARB, power_off_outputs
+from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
 
 
-def run_nls_switch_test(Q, ch1, ch2, params, save_dir, fname_prefix=None):
+SEGARB_OPTIONS = {
+    "ENABLE_CONNECTION_COMP": False,
+    "ENABLE_LOAD_CONFIG": True,
+    "LOAD_RESISTANCE": 1e3,
+    "ENABLE_LLEC": False,
+}
+INST = "TCPIP0::129.125.87.80::1225::SOCKET"
+CH1, CH2 = 1, 2
+PARAMS = dict(
+
+    Vsquare=1,
+
+
+
+    offset=0,
+    Vp=5,
+    Rt_p=2.5e-4,
+    Delaytime=5e-4,
+    Rt_s=1e-7,
+    Dwell=1e-6,
+    Irange1=1e-4,
+    Irange2=1e-4,
+    MeasureSquare=False,
+    area_cm2=(20*1e-4)**2*3.14,
+
+    
+)
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\Jingtian\2025-12-14\BTO\Device3")
+PREVIEW_ONLY = True
+
+
+def make_nls_seq_configs(ch1, ch2, params):
+    """Build the exact 14-segment NLS sequence used for preview and execution."""
+    measure_square = params.get("MeasureSquare", True)
+    offset = params["offset"]
+    vp = params["Vp"]
+    rt_p = params["Rt_p"]
+    delay_time = params["Delaytime"]
+    vsquare = params["Vsquare"]
+    rt_s = params["Rt_s"]
+    dwell = params["Dwell"]
+
+    start_voltages = [
+        0,
+        0,
+        offset,
+        -vp + offset,
+        offset,
+        offset,
+        vsquare + offset,
+        vsquare + offset,
+        offset,
+        offset,
+        vp + offset,
+        offset,
+        offset,
+        vp + offset,
+    ]
+    stop_voltages = [
+        0,
+        offset,
+        -vp + offset,
+        offset,
+        offset,
+        vsquare + offset,
+        vsquare + offset,
+        offset,
+        offset,
+        vp + offset,
+        offset,
+        offset,
+        vp + offset,
+        offset,
+    ]
+    time_values = [
+        rt_p,
+        rt_p,
+        rt_p,
+        rt_p,
+        delay_time,
+        rt_s,
+        dwell,
+        rt_s,
+        delay_time,
+        rt_p,
+        rt_p,
+        delay_time,
+        rt_p,
+        rt_p,
+    ]
+    measure_square_type = 2 if measure_square else 0
+    meas_types = [
+        0,
+        0,
+        0,
+        0,
+        0,
+        measure_square_type,
+        measure_square_type,
+        measure_square_type,
+        0,
+        2,
+        2,
+        0,
+        2,
+        2,
+    ]
+
+    ch1_config = (1, start_voltages, stop_voltages, time_values, meas_types)
+    ch2_config = (
+        1,
+        [0.0] * len(time_values),
+        [0.0] * len(time_values),
+        time_values,
+        meas_types,
+    )
+    return {ch1: [ch1_config], ch2: [ch2_config]}
+
+
+def preview_nls_waveform(params, output_path=None, *, ch1=1, ch2=2):
+    """Preview both programmed NLS channels without connecting to the PMU."""
+    seq_configs = make_nls_seq_configs(ch1, ch2, params)
+    return preview_sequence_configs(
+        seq_configs[ch1] + seq_configs[ch2],
+        output_path,
+        title_prefix="NLS switch",
+        channel_labels=(f"CH{ch1}", f"CH{ch2}"),
+    )
+
+
+def build_params_table(params, segarb_options):
+    """Return NLS parameters and common PMU options as a two-column table."""
+    rows = [{"name": name, "value": repr(value)} for name, value in params.items()]
+    rows.extend(
+        {"name": name, "value": repr(value)}
+        for name, value in segarb_options.items()
+    )
+    return pd.DataFrame(rows)
+
+
+def run_nls_switch_test(
+    Q,
+    ch1,
+    ch2,
+    params,
+    save_dir,
+    fname_prefix=None,
+    *,
+    segarb_options=None,
+):
     """Run one NLS switch measurement and save raw and processed outputs."""
+    if segarb_options is None:
+        segarb_options = SEGARB_OPTIONS
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -28,7 +185,15 @@ def run_nls_switch_test(Q, ch1, ch2, params, save_dir, fname_prefix=None):
         "Running NLS switch "
         f"(Vp={params['Vp']}V, Vsquare={params['Vsquare']:.2f}V, Dwell={params['Dwell']:.1e}s)..."
     )
-    hy_NISswitch_segARB(Q, ch1, ch2, params)
+    seq_configs = make_nls_seq_configs(ch1, ch2, params)
+    current_ranges = {ch1: params["Irange1"], ch2: params["Irange2"]}
+    execute_segARB_test(
+        Q,
+        [ch1, ch2],
+        seq_configs,
+        current_ranges=current_ranges,
+        options=segarb_options,
+    )
     df_ch1, df_ch2 = read_both_channels(Q, ch1, ch2)
     power_off_outputs(Q, (ch1, ch2))
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
@@ -41,6 +206,11 @@ def run_nls_switch_test(Q, ch1, ch2, params, save_dir, fname_prefix=None):
         with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
             df_ch1.to_excel(writer, sheet_name="Raw_CH1", index=False)
             df_ch2.to_excel(writer, sheet_name="Raw_CH2", index=False)
+            build_params_table(params, segarb_options).to_excel(
+                writer,
+                sheet_name="Parameters",
+                index=False,
+            )
 
         fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
         for axis, df, channel, title in (
@@ -101,6 +271,11 @@ def run_nls_switch_test(Q, ch1, ch2, params, save_dir, fname_prefix=None):
         df_ch2.to_excel(writer, sheet_name="Raw_CH2", index=False)
         df_vp_ch1.to_excel(writer, sheet_name="VP_CH1", index=False)
         df_vp_ch2.to_excel(writer, sheet_name="VP_CH2", index=False)
+        build_params_table(params, segarb_options).to_excel(
+            writer,
+            sheet_name="Parameters",
+            index=False,
+        )
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     axes[0].plot(df_vp_ch1["Voltage"], df_vp_ch1["Polarization"], "b-", linewidth=1)
@@ -123,22 +298,15 @@ def run_nls_switch_test(Q, ch1, ch2, params, save_dir, fname_prefix=None):
 
 
 if __name__ == "__main__":
-    INST = "TCPIP0::129.125.87.80::1225::SOCKET"
-    CH1, CH2 = 1, 2
-    params = dict(
-        offset=0,
-        Vp=2,
-        Rt_p=5e-5,
-        Delaytime=100e-6,
-        Vsquare=1,
-        Rt_s=1e-7,
-        Dwell=1e-6,
-        Irange1=1e-4,
-        Irange2=1e-4,
-        MeasureSquare=False,
-        area_cm2=7.0686e-6,
-    )
-    SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\Jingtian\2025-12-14\BTO\Device3")
-
-    with PMUSession(INST, channels=(CH1, CH2)) as session:
-        run_nls_switch_test(session.query, CH1, CH2, params, SAVE_DIR)
+    if PREVIEW_ONLY:
+        preview_nls_waveform(PARAMS, ch1=CH1, ch2=CH2)
+    else:
+        with PMUSession(INST, channels=(CH1, CH2)) as session:
+            run_nls_switch_test(
+                session.query,
+                CH1,
+                CH2,
+                PARAMS,
+                SAVE_DIR,
+                segarb_options=SEGARB_OPTIONS,
+            )

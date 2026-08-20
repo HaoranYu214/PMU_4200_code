@@ -37,6 +37,12 @@ RUN_PV2 = True
 RUN_PUND_TRI = True
 STOP_ON_ERROR = False
 SETTLE_TIME_S = 0.5
+SEGARB_OPTIONS = {
+    "ENABLE_CONNECTION_COMP": False,
+    "ENABLE_LOAD_CONFIG": True,
+    "LOAD_RESISTANCE": 1e6,
+    "ENABLE_LLEC": False,
+}
 
 SAVE_ROOT = Path(
     r"C:\Users\P317151\Documents\data\11-06-2026\03D2\L40um1\FE\parameter_sweep\frequency_5V_1e-2s_delay"
@@ -56,6 +62,8 @@ def configure_test(module, *, vp, frequency_hz, delay_time_s, save_dir):
     module.params["Vp"] = float(vp)
     module.params["rise_time"] = frequency_to_rise_time(frequency_hz)
     module.params["delay_time"] = float(delay_time_s)
+    module.SEGARB_OPTIONS.clear()
+    module.SEGARB_OPTIONS.update(SEGARB_OPTIONS)
     module.SAVE_DIR = Path(save_dir)
     module.SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -118,6 +126,8 @@ def run_one_test(module, test_name, vp, frequency_hz, delay_time_s, run_index, t
         "delay_time_s": delay_time_s,
         "Irange1_A": module.params["Irange1"],
         "Irange2_A": module.params["Irange2"],
+        "load_config_enabled": module.SEGARB_OPTIONS["ENABLE_LOAD_CONFIG"],
+        "load_resistance_ohm": module.SEGARB_OPTIONS["LOAD_RESISTANCE"],
         "start_time": start_time,
         "end_time": end_time,
         "duration_s": (end_time - start_time).total_seconds(),

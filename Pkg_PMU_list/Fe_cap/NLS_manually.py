@@ -32,13 +32,19 @@ params = dict(
     MeasureSquare=False,
     area_cm2=7.0686e-6,
 )
+SEGARB_OPTIONS = {
+    "ENABLE_CONNECTION_COMP": False,
+    "ENABLE_LOAD_CONFIG": True,
+    "LOAD_RESISTANCE": 1e3,
+    "ENABLE_LLEC": False,
+}
 
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\Jingtian\2025-12-14\BTO\Device2")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-08-2026\Johanna\NLS")
 fname_prefix = (
     f"NISswitch_Meas{params['Vp']}V_{int(params['Rt_p'] * 1e6)}us_"
     f"with{params['Vsquare']}V_{int(params['Rt_s'] * 1e6)}us"
 )
-PREVIEW_ONLY = False
+PREVIEW_ONLY = True
 
 
 def make_nls_seq_configs():
@@ -113,6 +119,16 @@ def preview_waveform(output_path=None):
     return preview_sequence_configs(make_nls_seq_configs()[CH1], output_path, title_prefix="NLS CH1")
 
 
+def build_params_table():
+    """Return NLS and common PMU options as a two-column table."""
+    rows = [{"name": name, "value": repr(value)} for name, value in params.items()]
+    rows.extend(
+        {"name": name, "value": repr(value)}
+        for name, value in SEGARB_OPTIONS.items()
+    )
+    return pd.DataFrame(rows)
+
+
 def process_nls_channel(df, channel):
     """Calculate differential polarization for one NLS channel."""
     voltage = df[f"Voltage {channel}"].values
@@ -151,6 +167,7 @@ def save_nls_results(df_ch1, df_ch2):
         with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
             df_ch1.to_excel(writer, sheet_name="Raw_CH1", index=False)
             df_ch2.to_excel(writer, sheet_name="Raw_CH2", index=False)
+            build_params_table().to_excel(writer, sheet_name="Parameters", index=False)
 
         fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
         for axis, df, channel, title in (
@@ -182,6 +199,7 @@ def save_nls_results(df_ch1, df_ch2):
         df_ch2.to_excel(writer, sheet_name="Raw_CH2", index=False)
         df_vp_ch1.to_excel(writer, sheet_name="VP_CH1", index=False)
         df_vp_ch2.to_excel(writer, sheet_name="VP_CH2", index=False)
+        build_params_table().to_excel(writer, sheet_name="Parameters", index=False)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     axes[0].plot(df_vp_ch1["Voltage"], df_vp_ch1["Polarization"], "b-", linewidth=1)
@@ -212,7 +230,13 @@ def main():
         )
         seq_configs = make_nls_seq_configs()
         current_ranges = {CH1: params["Irange1"], CH2: params["Irange2"]}
-        execute_segARB_test(query, [CH1, CH2], seq_configs, current_ranges=current_ranges)
+        execute_segARB_test(
+            query,
+            [CH1, CH2],
+            seq_configs,
+            current_ranges=current_ranges,
+            options=SEGARB_OPTIONS,
+        )
         df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
         power_off_outputs(query, (CH1, CH2))
         if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:

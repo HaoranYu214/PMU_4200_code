@@ -19,21 +19,29 @@ from src.data_processing import read_both_channels
 from src.pmu_tests import execute_segARB_test, power_off_outputs
 from src.session import PMUSession
 
+
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 params = dict(
-    rise_time=5e-5,
-    delay_time=5e-5,
-    Vp=4.5,
+    rise_time=2.5e-4,
+    delay_time=5e-4,
+    offset_ramp_time=1e-4,
+    Vp=5,
     offset=0,
     # area_cm2=1.2567e-5,
-    # area_cm2=(20*1e-4)**2*3.14,
-    area_cm2=(40*1e-4)**2,
-    Irange1=1e-3,
+    area_cm2=(20*1e-4)**2*3.14,
+    # area_cm2=(40*1e-4)**2,
+    Irange1=1e-4,
     Irange2=1e-4,
 )
+SEGARB_OPTIONS = {
+    "ENABLE_CONNECTION_COMP": False,
+    "ENABLE_LOAD_CONFIG": True,
+    "LOAD_RESISTANCE": 1e3,
+    "ENABLE_LLEC": False,
+}
 
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um6\FE")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-08-2026\Johanna")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 PREVIEW_ONLY = False
 
@@ -67,12 +75,13 @@ def make_pund_seq_configs():
     """Build five triangular PUND pulses separated by unmeasured delays."""
     rise_time = params["rise_time"]
     delay_time = params["delay_time"]
+    offset_ramp_time = params["offset_ramp_time"]
     vp = params["Vp"]
     offset = params["offset"]
 
     start_voltages = [
         0,
-        0,
+        offset,
         offset,
         -vp + offset,
         offset,
@@ -90,7 +99,7 @@ def make_pund_seq_configs():
         offset,
     ]
     stop_voltages = [
-        0,
+        offset,
         offset,
         -vp + offset,
         offset,
@@ -109,7 +118,7 @@ def make_pund_seq_configs():
         offset,
     ]
     time_values = [
-        delay_time,
+        offset_ramp_time,
         delay_time,
         rise_time,
         rise_time,
@@ -149,9 +158,12 @@ def preview_waveform(output_path=None):
 
 def build_params_table():
     """Return the PUND run parameters as a two-column table."""
-    return pd.DataFrame(
-        [{"name": name, "value": repr(value)} for name, value in params.items()]
+    rows = [{"name": name, "value": repr(value)} for name, value in params.items()]
+    rows.extend(
+        {"name": name, "value": repr(value)}
+        for name, value in SEGARB_OPTIONS.items()
     )
+    return pd.DataFrame(rows)
 
 
 def save_pund_workbook(output_path, df_ch1, df_ch2, data):
@@ -173,6 +185,7 @@ def acquire_with_auto_range(query):
             [CH1, CH2],
             make_pund_seq_configs(),
             current_ranges=current_ranges,
+            options=SEGARB_OPTIONS,
         )
         df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
         power_off_outputs(query, (CH1, CH2))

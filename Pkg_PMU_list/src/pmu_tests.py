@@ -24,14 +24,26 @@ def _apply_common_pmu_options(Q, channels, options=None):
     if not options:
         return
     if options.get("ENABLE_CONNECTION_COMP", False):
-        for ch in channels:
+        comp_channels = options.get("CONNECTION_COMP_CHANNELS", channels)
+        for ch in comp_channels:
+            if ch not in channels:
+                raise ValueError(f"Connection-comp channel {ch} is not an active PMU channel.")
             Q(f":PMU:CONNECTION:COMP {ch}, 1, 1")
     if options.get("ENABLE_LOAD_CONFIG", False):
-        resistance = options.get("LOAD_RESISTANCE", 1e6)
+        resistances = options.get("LOAD_RESISTANCES")
+        default_resistance = options.get("LOAD_RESISTANCE", 1e6)
         for ch in channels:
+            resistance = (
+                resistances.get(ch, default_resistance)
+                if resistances is not None
+                else default_resistance
+            )
             Q(f":PMU:LOAD {ch}, {resistance}")
     if options.get("ENABLE_LLEC", False):
-        for ch in channels:
+        llec_channels = options.get("LLEC_CHANNELS", channels)
+        for ch in llec_channels:
+            if ch not in channels:
+                raise ValueError(f"LLEC channel {ch} is not an active PMU channel.")
             Q(f":PMU:LLEC:CONFIGURE {ch}, 1")
 
 
@@ -53,16 +65,84 @@ def _send_sarb_array(Q, command, ch, seq_id, values, *, formatter=str):
         Q(f"{add_command} {ch}, {seq_id}, {chunk_values}")
 
 
+def _normalize_seg_arb_measurements(time_values, meas_types=None, meas_start=None, meas_stop=None):
+    """Return PMU-valid measurement arrays for one Segment Arb sequence.
+
+    The PMU requires unmeasured segments to use a zero start/stop window. For
+    measured segments, the window must be positive and remain inside the
+    corresponding segment duration.
+    """
+    segment_count = len(time_values)
+    durations = [float(value) for value in time_values]
+    modes = [2] * segment_count if meas_types is None else list(meas_types)
+    starts = [0.0] * segment_count if meas_start is None else list(meas_start)
+    stops = (
+        [duration if mode != 0 else 0.0 for duration, mode in zip(durations, modes)]
+        if meas_stop is None
+        else list(meas_stop)
+    )
+
+    arrays = {
+        "meas_types": modes,
+        "meas_start": starts,
+        "meas_stop": stops,
+    }
+    for name, values in arrays.items():
+        if len(values) != segment_count:
+            raise ValueError(
+                f"Segment Arb {name} has {len(values)} entries; "
+                f"expected {segment_count}."
+            )
+
+    for index, duration in enumerate(durations):
+        if duration <= 0:
+            raise ValueError(f"Segment Arb segment {index} duration must be positive.")
+
+        mode = int(modes[index])
+        if mode not in (0, 1, 2, 3, 4):
+            raise ValueError(f"Segment Arb segment {index} has invalid measure type {modes[index]}.")
+        modes[index] = mode
+
+        if mode == 0:
+            # Keithley error -823 is raised when a measurement window is sent
+            # for a segment whose measurement type is NONE.
+            starts[index] = 0.0
+            stops[index] = 0.0
+            continue
+
+        start = float(starts[index])
+        stop = float(stops[index])
+        tolerance = max(abs(duration) * 1e-12, 1e-18)
+        if start < 0 or stop <= start or stop > duration + tolerance:
+            raise ValueError(
+                f"Segment Arb segment {index} measurement window "
+                f"[{start:g}, {stop:g}] s is outside its {duration:g} s duration."
+            )
+        starts[index] = start
+        stops[index] = min(stop, duration)
+
+    return modes, starts, stops
+
+
 def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time_values,
                               meas_types=None, meas_start=None, meas_stop=None):
     """通用segARB序列配置函数，支持长数组自动用 :ADD 续传。"""
     n_segments = len(start_voltages)
-    if meas_types is None:
-        meas_types = [2] * n_segments
-    if meas_start is None:
-        meas_start = [0] * n_segments
-    if meas_stop is None:
-        meas_stop = list(time_values)
+    array_lengths = {
+        "stop_voltages": len(stop_voltages),
+        "time_values": len(time_values),
+    }
+    for name, length in array_lengths.items():
+        if length != n_segments:
+            raise ValueError(
+                f"Segment Arb {name} has {length} entries; expected {n_segments}."
+            )
+    meas_types, meas_start, meas_stop = _normalize_seg_arb_measurements(
+        time_values,
+        meas_types,
+        meas_start,
+        meas_stop,
+    )
 
     _send_sarb_array(Q, ":PMU:SARB:SEQ:STARTV", ch, seq_id, start_voltages)
     _send_sarb_array(Q, ":PMU:SARB:SEQ:STOPV", ch, seq_id, stop_voltages)
@@ -96,12 +176,29 @@ def auto_align_channels(seq_configs):
         for ch in channels:
             if ch == ref_ch:
                 continue
+            channel_time = ch_configs[ch][3]
+            # Two dynamic channels are already aligned when their segment
+            # durations match.  Do not require either waveform to be constant.
+            if len(channel_time) == len(ref_time) and all(
+                abs(a - b) < 1e-15 for a, b in zip(channel_time, ref_time)
+            ):
+                continue
             start_v, stop_v = ch_configs[ch][1], ch_configs[ch][2]
             is_const = all(abs(a-b) < 1e-12 for a, b in zip(start_v, stop_v))
             if not is_const:
                 raise ValueError(f"CH{ch} 非恒压序列，且与CH{ref_ch}段数不一致，无法自动对齐")
             v = start_v[0] if len(start_v) else 0.0
-            new_config = (ch_configs[ch][0], [v]*len(ref_time), [v]*len(ref_time), ref_time) + ch_configs[ch][4:]
+            # An expanded hold waveform is deliberately unmeasured.
+            zeros = [0.0] * len(ref_time)
+            new_config = (
+                ch_configs[ch][0],
+                [v] * len(ref_time),
+                [v] * len(ref_time),
+                list(ref_time),
+                [0] * len(ref_time),
+                zeros.copy(),
+                zeros.copy(),
+            )
             for i, cfg in enumerate(seq_configs[ch]):
                 if cfg[0] == seq_id:
                     seq_configs[ch][i] = new_config
@@ -144,7 +241,7 @@ def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=
     if current_ranges:
         for ch, i_range in current_ranges.items():
             Q(f":PMU:MEASURE:RANGE {ch}, 2, {i_range}")
-            print(f"   CH{ch} 电流范围 (固定): {i_range:.2e} A")
+            print(f"   CH{ch} current range (fixed): {i_range:.2e} A")
 
     seq_configs = auto_align_channels(seq_configs)
 
@@ -170,7 +267,7 @@ def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=
         Q(f":PMU:OUTPUT:STATE {ch}, 1")
     Q(":PMU:EXECUTE")
 
-    print("等待 segARB 测试完成...")
+    print("Waiting for Segment Arb test completion...")
     while True:
         try:
             status_str = Q(":PMU:TEST:STATUS?")
@@ -181,12 +278,12 @@ def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=
             if status_str:
                 try:
                     if int(status_str) == 0:
-                        print("segARB 测试完成")
+                        print("Segment Arb test complete.")
                         break
                 except ValueError:
-                    print(f"⚠️ 无法解析状态: '{status_str}'")
+                    print(f"WARNING: Could not parse PMU test status: '{status_str}'")
         except Exception as e:
-            print(f"⚠️ 查询状态出错: {e}")
+            print(f"WARNING: PMU test status query failed: {e}")
         time.sleep(0.3)
 
 

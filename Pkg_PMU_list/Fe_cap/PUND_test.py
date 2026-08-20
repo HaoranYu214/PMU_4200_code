@@ -33,6 +33,12 @@ params = dict(
     Irange1=1e-3,
     Irange2=1e-4,
 )
+SEGARB_OPTIONS = {
+    "ENABLE_CONNECTION_COMP": False,
+    "ENABLE_LOAD_CONFIG": False,
+    "LOAD_RESISTANCE": 1e6,
+    "ENABLE_LLEC": False,
+}
 
 SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\11-06-2026\03D2\L40um1\FE\freqency")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -154,9 +160,12 @@ def preview_waveform(output_path=None):
 
 def build_params_table():
     """Return the PUND run parameters as a two-column table."""
-    return pd.DataFrame(
-        [{"name": name, "value": repr(value)} for name, value in params.items()]
+    rows = [{"name": name, "value": repr(value)} for name, value in params.items()]
+    rows.extend(
+        {"name": name, "value": repr(value)}
+        for name, value in SEGARB_OPTIONS.items()
     )
+    return pd.DataFrame(rows)
 
 
 def save_pund_workbook(output_path, df_ch1, df_ch2, data):
@@ -178,6 +187,7 @@ def acquire_with_auto_range(query):
             [CH1, CH2],
             make_pund_seq_configs(),
             current_ranges=current_ranges,
+            options=SEGARB_OPTIONS,
         )
         df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
         power_off_outputs(query, (CH1, CH2))

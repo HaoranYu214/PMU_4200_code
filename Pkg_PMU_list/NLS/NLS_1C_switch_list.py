@@ -7,28 +7,48 @@ import time
 import numpy as np
 import pandas as pd
 
-from NLS_1C_switch import run_nls_switch_test
+from NLS_1C_switch import preview_nls_waveform, run_nls_switch_test
 from src.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
+SEGARB_OPTIONS = {
+    "ENABLE_CONNECTION_COMP": False,
+    "ENABLE_LOAD_CONFIG": True,
+    "LOAD_RESISTANCE": 1e3,
+    "ENABLE_LLEC": False,
+}
+PREVIEW_ONLY = False
 
 BASE_PARAMS = dict(
     offset=0,
-    Vp=2,
-    Rt_p=5e-5,
-    Delaytime=100e-6,
+    Vp=5,
+    Rt_p=2.5e-4,
+    Delaytime=5e-4,
     Rt_s=1e-7,
     Dwell=1e-6,
-    Irange1=1e-4,
-    Irange2=1e-4,
+    Irange1=1e-5,
+    Irange2=1e-5,
     MeasureSquare=False,
-    area_cm2=7.0686e-6,
+    area_cm2=(20*1e-4)**2*3.14,
 )
 
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\Jingtian\2025-12-14\BTO\Device3\NLS_Sweep")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\19-08-2026\Johanna\NLS_Sweep")
 Dwell_list = np.logspace(-7, -1, 31)
 Vsquare_list = np.arange(0, 2.0, 0.1)
+
+
+def preview_sweep_waveform(output_path=None):
+    """Preview the first configured sweep point without connecting to the PMU."""
+    preview_params = BASE_PARAMS.copy()
+    preview_params["Dwell"] = float(Dwell_list[0])
+    preview_params["Vsquare"] = float(Vsquare_list[0])
+    return preview_nls_waveform(
+        preview_params,
+        output_path,
+        ch1=CH1,
+        ch2=CH2,
+    )
 
 
 def run_sweep():
@@ -51,7 +71,14 @@ def run_sweep():
                     params["Dwell"] = dwell
 
                     try:
-                        result = run_nls_switch_test(query, CH1, CH2, params, SAVE_DIR)
+                        result = run_nls_switch_test(
+                            query,
+                            CH1,
+                            CH2,
+                            params,
+                            SAVE_DIR,
+                            segarb_options=SEGARB_OPTIONS,
+                        )
                         result["params"] = params.copy()
                         results.append(result)
                         if "df_vp_ch1" in result and result["df_vp_ch1"] is not None:
@@ -59,13 +86,29 @@ def run_sweep():
                             pr_value = -pol[0] + pol[-1] if len(pol) > 0 else None
                         else:
                             pr_value = None
-                        summary_data.append({"Vsquare": vsquare, "Dwell": dwell, "Pr": pr_value})
+                        summary_data.append(
+                            {
+                                "Vsquare": vsquare,
+                                "Dwell": dwell,
+                                "Pr": pr_value,
+                                "ENABLE_LOAD_CONFIG": SEGARB_OPTIONS["ENABLE_LOAD_CONFIG"],
+                                "LOAD_RESISTANCE": SEGARB_OPTIONS["LOAD_RESISTANCE"],
+                            }
+                        )
                     except KeyboardInterrupt:
                         raise
                     except Exception as exc:
                         print(f"  Test failed: {exc}")
                         results.append({"params": params.copy(), "success": False, "error": str(exc)})
-                        summary_data.append({"Vsquare": vsquare, "Dwell": dwell, "Pr": None})
+                        summary_data.append(
+                            {
+                                "Vsquare": vsquare,
+                                "Dwell": dwell,
+                                "Pr": None,
+                                "ENABLE_LOAD_CONFIG": SEGARB_OPTIONS["ENABLE_LOAD_CONFIG"],
+                                "LOAD_RESISTANCE": SEGARB_OPTIONS["LOAD_RESISTANCE"],
+                            }
+                        )
                     time.sleep(0.5)
         except KeyboardInterrupt:
             interrupted = True
@@ -83,4 +126,7 @@ def run_sweep():
 
 
 if __name__ == "__main__":
-    run_sweep()
+    if PREVIEW_ONLY:
+        preview_sweep_waveform()
+    else:
+        run_sweep()
