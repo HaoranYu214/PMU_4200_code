@@ -12,9 +12,9 @@ from .instrcomms import Communications
 class SMUSession:
     """Connect to KXCI and expose the query callable used by SMU helpers.
 
-    Output shutdown is performed by the test helper that knows whether a
-    channel was configured with DV, DI, or DS. The session always disconnects,
-    including when the experiment raises an exception.
+    Output shutdown is performed by the System/User Mode helper that knows the
+    active channels. The session always closes VISA resources, including when
+    the experiment raises an exception.
     """
 
     instrument_resource: str
@@ -27,14 +27,20 @@ class SMUSession:
         self.client = None
 
     def connect(self):
-        self.client = Communications(self.instrument_resource)
-        self.client.connect(timeout=self.timeout)
-        instrument = self.client._instrument_object
-        if instrument is None:
-            raise RuntimeError("Failed to connect to the 4200A-SCS.")
-        instrument.write_termination = self.write_termination
-        instrument.read_termination = self.read_termination
-        self.client._echo_cmds = self.echo_commands
+        try:
+            self.client = Communications(self.instrument_resource)
+            self.client.connect(timeout=self.timeout)
+            instrument = self.client._instrument_object
+            if instrument is None:
+                raise RuntimeError("Failed to connect to the 4200A-SCS.")
+            instrument.write_termination = self.write_termination
+            instrument.read_termination = self.read_termination
+            self.client._echo_cmds = self.echo_commands
+        except BaseException:
+            if self.client is not None:
+                self.client.close()
+            self.client = None
+            raise
         return self
 
     @property
@@ -45,7 +51,7 @@ class SMUSession:
 
     def disconnect(self):
         if self.client is not None:
-            self.client.disconnect()
+            self.client.close()
             self.client = None
 
     def __enter__(self):

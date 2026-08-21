@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
+import operator
 import re
+import warnings
 
 import pandas as pd
 
@@ -49,14 +52,65 @@ def retrieve_variable(query, variable):
     return values, statuses
 
 
-def retrieve_variables(query, variables, *, include_status=True):
-    """Download completed System Mode buffers into a padded DataFrame."""
+def retrieve_variables(
+    query,
+    variables,
+    *,
+    include_status=True,
+    expected_point_count=None,
+    strict=True,
+    fail_on_compliance=False,
+):
+    """Download and validate completed System Mode buffers."""
+    variables = [str(variable) for variable in variables]
+    if not variables:
+        raise ValueError("variables must contain at least one KXCI buffer name.")
+    if len(set(variables)) != len(variables):
+        raise ValueError("variables must not contain duplicate KXCI buffer names.")
+    if expected_point_count is not None:
+        try:
+            expected_point_count = operator.index(expected_point_count)
+        except TypeError as exc:
+            raise ValueError("expected_point_count must be a positive integer.") from exc
+        if expected_point_count < 1:
+            raise ValueError("expected_point_count must be a positive integer.")
     columns = {}
+    lengths = {}
+    compliance_hits = {}
     for variable in variables:
         values, statuses = retrieve_variable(query, variable)
+        lengths[variable] = len(values)
+        if any(not math.isfinite(value) or abs(value) >= 1e36 for value in values):
+            raise ValueError(f"{variable} contains invalid/overflow KXCI readings.")
+        compliance_count = sum(status.upper() == "C" for status in statuses)
+        if compliance_count:
+            compliance_hits[variable] = compliance_count
         columns[variable] = pd.Series(values, dtype=float)
         if include_status and any(statuses):
             columns[f"{variable}_Status"] = pd.Series(statuses, dtype="string")
+
+    if strict:
+        empty = [variable for variable, length in lengths.items() if length == 0]
+        if empty:
+            raise ValueError(f"KXCI returned empty buffers for: {', '.join(empty)}.")
+        if len(set(lengths.values())) > 1:
+            raise ValueError(f"KXCI buffer lengths do not match: {lengths}.")
+        if expected_point_count is not None:
+            wrong = {
+                variable: length
+                for variable, length in lengths.items()
+                if length != expected_point_count
+            }
+            if wrong:
+                raise ValueError(
+                    f"Expected {expected_point_count} points per variable; received {wrong}."
+                )
+
+    if compliance_hits:
+        message = f"KXCI compliance status detected: {compliance_hits}."
+        if fail_on_compliance:
+            raise RuntimeError(message)
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
     return pd.DataFrame(columns)
 
 

@@ -7,19 +7,20 @@ import sys
 
 import pandas as pd
 
-SMU_ROOT = Path(__file__).resolve().parents[1]
-if str(SMU_ROOT) not in sys.path:
-    sys.path.insert(0, str(SMU_ROOT))
+PKG_ROOT = Path(__file__).resolve().parents[2] / "Pkg_PMU_list"
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
-from src.data_processing import retrieve_variables, save_workbook
-from src.plotting import save_current_plots
-from src.session import SMUSession
-from src.system_mode import build_segmented_voltage_path, run_list_voltage_sweep
+from src.smu.data_processing import retrieve_variables, save_workbook
+from src.smu.plotting import save_current_plots
+from src.smu.session import SMUSession
+from src.smu.system_mode import build_segmented_voltage_path, run_list_voltage_sweep
 
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 SWEEP_CHANNEL = 2
 BIAS_CHANNEL = 1
+AVAILABLE_CHANNELS = (1, 2, 3, 4)
 
 # The instrument follows these turning points in order.
 V1 = 3
@@ -36,7 +37,7 @@ PARAMS = {
     "bias_current_compliance": 1e-3,
     # Numeric value sends RG after SM DM2. Use "auto" or None to keep defaults.
     # Examples: 1e-12 with a preamp, 100e-9 without a preamp.
-    "sweep_current_range": 1e-9,
+    "sweep_current_range": "auto",
     "bias_current_range": "auto",
     "hold_time": 0.0,
     "sweep_delay": 0.02,
@@ -73,9 +74,14 @@ def main():
             sweep_current_name=NAMES["sweep_current"],
             bias_voltage_name=NAMES["bias_voltage"],
             bias_current_name=NAMES["bias_current"],
+            available_channels=AVAILABLE_CHANNELS,
             **PARAMS,
         )
-        data = retrieve_variables(session.query, variables)
+        data = retrieve_variables(
+            session.query,
+            variables,
+            expected_point_count=len(sweep_values),
+        )
 
     # Keep the programmed path next to the measured voltage/current. Series
     # padding makes a point-count mismatch visible instead of hiding it.
@@ -93,6 +99,7 @@ def main():
         "INST": INST,
         "SWEEP_CHANNEL": SWEEP_CHANNEL,
         "BIAS_CHANNEL": BIAS_CHANNEL,
+        "AVAILABLE_CHANNELS": AVAILABLE_CHANNELS,
         "TURNING_POINTS": TURNING_POINTS,
         "SEGMENT_STEP": SEGMENT_STEP,
         "POINT_COUNT": len(sweep_values),

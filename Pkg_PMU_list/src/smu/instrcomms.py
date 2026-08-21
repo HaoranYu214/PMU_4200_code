@@ -31,6 +31,13 @@ class Communications:
             self._instrument_object.close()
             self._instrument_object = None
 
+    def close(self):
+        """Close the instrument and VISA resource manager."""
+        self.disconnect()
+        if self._resource_manager is not None:
+            self._resource_manager.close()
+            self._resource_manager = None
+
     def query(self, command):
         if self._instrument_object is None:
             raise RuntimeError("No instrument connection is open.")

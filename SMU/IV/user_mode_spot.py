@@ -5,12 +5,12 @@ from pathlib import Path
 import sys
 import time
 
-SMU_ROOT = Path(__file__).resolve().parents[1]
-if str(SMU_ROOT) not in sys.path:
-    sys.path.insert(0, str(SMU_ROOT))
+PKG_ROOT = Path(__file__).resolve().parents[2] / "Pkg_PMU_list"
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
-from src.session import SMUSession
-from src.user_mode import (
+from src.smu.session import SMUSession
+from src.smu.user_mode import (
     initialize_user_mode,
     measure_current,
     power_off_user_channels,
