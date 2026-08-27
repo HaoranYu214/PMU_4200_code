@@ -611,6 +611,10 @@ def run_list_voltage_sweep(
     values = [float(value) for value in values]
     if not values:
         raise ValueError("values must contain at least one voltage.")
+    if len(values) > 4096:
+        raise ValueError(
+            f"KXCI list sweeps are limited to 4096 points; received {len(values)}."
+        )
 
     sweep_channel, bias_channel, available_channels = _validate_two_channel_run(
         sweep_channel,

@@ -34,14 +34,46 @@ SMU_CONNECTIONS = {
     4: "direct",
 }
 
+# Positive peak shrinks from +5 V to 0 V in 0.2 V increments. After every
+# positive excursion, the negative excursion remains fixed at -5 V:
+# 0 -> +5.0 -> 0 -> -5 -> 0 -> +4.8 -> 0 -> -5 -> 0 -> ... -> -5 -> 0.
+POSITIVE_PEAK_START = 5.0
+POSITIVE_PEAK_STOP = 0.0
+POSITIVE_PEAK_STEP = 0.2
+NEGATIVE_PEAK = -5.0
 
-# Generic device-check loop. Package/orchestration files may override these
-# globals before calling ``main()`` without duplicating the SMU implementation.
-POSITIVE_PEAK_V = 5.0
-NEGATIVE_PEAK_V = -5.0
-TURNING_POINTS = [0.0, POSITIVE_PEAK_V, 0.0, NEGATIVE_PEAK_V, 0.0]
+_positive_peak_count = int(
+    round((POSITIVE_PEAK_START - POSITIVE_PEAK_STOP) / POSITIVE_PEAK_STEP)
+)
+POSITIVE_PEAKS = [
+    round(POSITIVE_PEAK_START - index * POSITIVE_PEAK_STEP, 12)
+    for index in range(_positive_peak_count + 1)
+]
+
+TURNING_POINTS = [0.0]
+for positive_peak in POSITIVE_PEAKS:
+    # At the final 0 V level there is no positive excursion, but the matching
+    # fixed negative excursion is retained.
+    if positive_peak > 0:
+        TURNING_POINTS.extend([positive_peak, 0.0])
+    TURNING_POINTS.extend([NEGATIVE_PEAK, 0.0])
+
+# One value applies to every segment. A per-segment version is also valid:
+# SEGMENT_STEP = [0.05, 0.05, 0.1, 0.1]
 SEGMENT_STEP = 0.1
 
+# Accepted values for sweep_current_range and bias_current_range:
+# - None, "auto", "default", or "": skip RG and use the *RST default
+#   autorange floor (1 nA with a preamp; 100 nA without a preamp).
+# - A positive int/float, for example 1e-9 or 100e-9: send
+#   "RG channel, value" after "SM DM2".
+# - A positive numeric string, for example "1e-9": converted to float and
+#   handled exactly like the numeric form.
+# - Zero, negative values, or any other string: rejected with ValueError.
+# Common RG floors are 1e-12, 10e-12, 100e-12, 1e-9, 10e-9, 100e-9,
+# 1e-6, 10e-6, 100e-6, 1e-3, 10e-3, and 100e-3 A; 1e-12 through
+# 10e-9 require a preamp, and 1 A is available only on 4210/4211 SMUs.
+# RG sets the LOWEST range autoranging may select; it does not fix the range.
 PARAMS = {
     "sweep_current_compliance": 1e-3,
     "bias_voltage": 0.0,
@@ -72,11 +104,6 @@ SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\25-08-2026\03B4_hZO_2700_800\L
 def main():
     """Run the segmented list sweep and save measured plus commanded values."""
     sweep_values = build_segmented_voltage_path(TURNING_POINTS, SEGMENT_STEP)
-    if len(sweep_values) > 4096:
-        raise ValueError(
-            f"Segmented sweep contains {len(sweep_values)} points; "
-            "KXCI VL list sweeps are limited to 4096."
-        )
     print(
         f"Segmented sweep: {TURNING_POINTS}, "
         f"{len(sweep_values)} commanded points."
@@ -145,12 +172,6 @@ def main():
     except Exception as exc:
         print(f"Warning: failed to save current plots: {exc}")
     print(f"Saved segmented SMU sweep: {output_path.resolve()}")
-    return {
-        "output_path": output_path,
-        "iv_plot_path": iv_path if "iv_path" in locals() else None,
-        "log_plot_path": log_path if "log_path" in locals() else None,
-        "point_count": len(sweep_values),
-    }
 
 
 if __name__ == "__main__":
