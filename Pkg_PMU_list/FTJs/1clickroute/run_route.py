@@ -15,8 +15,10 @@ from route_config import TEST_ORDER
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PKG_ROOT = SCRIPT_DIR.parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 

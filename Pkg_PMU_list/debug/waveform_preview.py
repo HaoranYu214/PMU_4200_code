@@ -2,6 +2,12 @@
 """Helpers for previewing generated segARB sequence configs."""
 
 from pathlib import Path
+import sys
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 MEASURE_MODE_LABELS = {
@@ -383,7 +389,7 @@ def preview_from_pmu_test(test_func, ch1, ch2, params, output_path=None, *, chan
     import contextlib
     import io
 
-    import src.pmu_tests as pmu_tests
+    import src.pmu.pmu_tests as pmu_tests
 
     captured = {}
     original_execute = pmu_tests.execute_segARB_test

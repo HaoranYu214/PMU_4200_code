@@ -10,36 +10,38 @@ import numpy as np
 import pandas as pd
 
 PKG_ROOT = Path(__file__).resolve().parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from debug.waveform_preview import preview_sequence_configs
-from src.current_range import acquire_with_auto_current_range
-from src.data_processing import read_both_channels
-from src.pmu_tests import execute_segARB_test, power_off_outputs
-from src.session import PMUSession
+from src.pmu.current_range import acquire_with_auto_current_range
+from src.pmu.data_processing import read_both_channels
+from src.pmu.pmu_tests import execute_segARB_test, power_off_outputs
+from src.pmu.session import PMUSession
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 params = dict(
-    rise_time=5e-5,
-    delay_time=5e-5,
-    Vp=6,
+    rise_time=2.5e-5,
+    delay_time=2.5e-5,
+    Vp=4.5,
     offset=0,
     # area_cm2=(20*1e-4)**2*3.14,
     # area_cm2=4e-6,
-    area_cm2=(40*1e-4)**2,
-    Irange1=1e-3,
-    Irange2=1e-3,
+    area_cm2=(20*1e-4)**2,
+    Irange1=1e-4,
+    Irange2=1e-4,
 )
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e6,
+    "LOAD_RESISTANCE": 1e3,
     "ENABLE_LLEC": False,
 }
 PREVIEW_ONLY = False
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um6\FE")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\25-08-2026\03B4_hZO_2700_800\L20_4\after IV")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 def build_fname_base():

@@ -5,15 +5,16 @@ from pathlib import Path
 import sys
 import time
 
-PKG_ROOT = Path(__file__).resolve().parents[2] / "Pkg_PMU_list"
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from src.smu.session import SMUSession
 from src.smu.user_mode import (
     initialize_user_mode,
     measure_current,
-    power_off_user_channels,
+    power_off_voltage_source,
+    restore_user_mode_rpms,
     source_voltage,
 )
 
@@ -25,11 +26,23 @@ CURRENT_COMPLIANCE = 1e-3
 VOLTAGE_RANGE_CODE = 0
 SETTLE_TIME_S = 0.1
 
+# Physical SMU-to-probe wiring for this 4200A.
+SMU_CONNECTIONS = {
+    1: "rpm:PMU1-1",
+    2: "rpm:PMU1-2",
+    3: "direct",
+    4: "direct",
+}
+
 
 def main():
     with SMUSession(INST) as session:
         query = session.query
-        initialize_user_mode(query)
+        rpm_targets = initialize_user_mode(
+            query,
+            active_channels=(CHANNEL,),
+            smu_connections=SMU_CONNECTIONS,
+        )
         try:
             source_voltage(
                 query,
@@ -42,7 +55,10 @@ def main():
             current = measure_current(query, CHANNEL)
             print(f"CH{CHANNEL}: V={SOURCE_VOLTAGE:g} V, I={current:.6e} A")
         finally:
-            power_off_user_channels(query, voltage_channels=(CHANNEL,))
+            # Do not restore an RPM relay unless DV shutdown succeeds. If
+            # shutdown raises, leave the RPM blue/SMU-routed for safe diagnosis.
+            power_off_voltage_source(query, CHANNEL)
+            restore_user_mode_rpms(query, rpm_targets)
 
 
 if __name__ == "__main__":

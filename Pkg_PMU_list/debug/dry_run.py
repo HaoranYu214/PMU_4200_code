@@ -20,6 +20,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = ROOT.parent
 DEFAULT_SCRIPT = ROOT / "1C_ftj_test.py"
 
 # Edit this path when you want to click "Run" on dry_run.py from the IDE.
@@ -83,6 +84,9 @@ class DryRunCommunications:
     def disconnect(self):
         self._state.print_command("# DISCONNECT")
 
+    def close(self):
+        self.disconnect()
+
     def write(self, command: str):
         self._state.print_command(command)
 
@@ -128,10 +132,12 @@ class DryRunSession:
 
 def install_dry_run_hooks(no_save=False):
     """Patch imported modules so test scripts print instead of connecting."""
-    sys.path.insert(0, str(ROOT))
-    import src.data_processing as data_processing
-    import src.instrcomms as instrcomms
-    import src.session as session
+    for path in (ROOT, REPO_ROOT):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    import src.pmu.data_processing as data_processing
+    import src.transport as transport
+    import src.pmu.session as session
     import matplotlib.figure as mpl_figure
     import pandas as pd
 
@@ -172,7 +178,7 @@ def install_dry_run_hooks(no_save=False):
         )
         return df1, df2
 
-    instrcomms.Communications = SharedDryRunCommunications
+    transport.Communications = SharedDryRunCommunications
     session.Communications = SharedDryRunCommunications
     session.PMUSession = SharedDryRunSession
     data_processing.read_both_channels = fake_read_both_channels

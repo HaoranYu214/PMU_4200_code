@@ -13,7 +13,7 @@ import time
 # Extra commands for plotting
 import plotly.express as px
 
-INST_RESOURCE_STR = "TCPIP0::192.0.2.0::1225::SOCKET" # Documentation-only placeholder; do not put a live address in reference examples
+INST_RESOURCE_STR = "TCPIP0::129.125.87.80::1225::SOCKET" # Documentation-only placeholder; do not put a live address in reference examples
 my4200 = Communications(INST_RESOURCE_STR) # Opens the resource manager in PyVISA with the corresponding instrument resource string
 my4200.connect() # Opens connections to the 4200A-SCS
 my4200._instrument_object.write_termination = "\0" # Set PyVISA write terminator
@@ -28,9 +28,9 @@ my4200.query("CH1, 'V1', 'I1', 1, 3")
 my4200.query("CH2, 'V2', 'I2', 1, 1")
 my4200.query("SS") # Access the source setup page
 # Setup VAR1 source function, linear sweep, 0 V to 5 V, 0.1 V steps, 10mA current compliance (SMU2)
-my4200.query("VR1, 1, 5, 0.1, 0.001")
+my4200.query("VR1, 1, 3, 0.1, 0.001")
 # Configure constant voltage, SMU channel 1, 0 V output value, 100 mA current compliance
-my4200.query("VC1, 0, 100e-3")
+my4200.query("VC1, 0, 1e-3")
 my4200.query("HT 0") # Set to a 0 second hold time
 my4200.query("DT 0.2") # Set to a 200 millisecond delay time
 my4200.query("IT1") # Set the integration time to 0.1 PLC

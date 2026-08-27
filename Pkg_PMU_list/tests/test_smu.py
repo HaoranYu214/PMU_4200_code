@@ -1,23 +1,38 @@
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
+import pandas as pd
+
 
 PKG_ROOT = Path(__file__).resolve().parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
-from src.smu.data_processing import retrieve_variables
+from src.smu.data_processing import build_plot_data, retrieve_variables, save_workbook
+from src.smu.plotting import format_log_current_tick, save_current_plots
 from src.smu.session import SMUSession
+from src.smu.routing import (
+    connect_smus_to_probes,
+    normalize_smu_connections,
+    restore_rpms_to_pulse,
+)
 from src.smu.system_mode import (
     configure_measurement_list,
+    estimate_smu_timeout_s,
     execute_and_wait,
     linear_sweep_point_count,
     run_linear_voltage_sweep,
+    resolve_smu_timeout_s,
     validate_linear_sweep,
 )
 from src.smu.user_mode import source_voltage
+from src.pmu.session import PMUSession
+from src.transport import Communications
 
 
 class FakeKxci:
@@ -40,6 +55,13 @@ class FakeKxci:
 
 
 class SmuSystemModeTests(unittest.TestCase):
+    CONNECTIONS = {
+        1: "rpm:PMU1-1",
+        2: "rpm:PMU1-2",
+        3: "direct",
+        4: "direct",
+    }
+
     def test_linear_sweep_disables_every_available_channel_before_defining_use(self):
         fake = FakeKxci()
 
@@ -68,6 +90,96 @@ class SmuSystemModeTests(unittest.TestCase):
         self.assertIn("ME1", fake.commands)
         self.assertEqual(variables, ["ISWEEP", "VSWEEP", "IBIAS", "VBIAS"])
 
+    def test_rpm_channels_switch_after_reset_and_restore_after_measurement(self):
+        fake = FakeKxci()
+
+        run_linear_voltage_sweep(
+            fake,
+            sweep_channel=2,
+            bias_channel=1,
+            available_channels=(1, 2, 3, 4),
+            smu_connections=self.CONNECTIONS,
+            start=0,
+            stop=0.1,
+            step=0.1,
+            timeout_s=1,
+        )
+
+        reset_position = fake.commands.index("*RST")
+        smu1_position = fake.commands.index("RP PMU1-1, 2")
+        smu2_position = fake.commands.index("RP PMU1-2, 2")
+        execute_position = fake.commands.index("ME1")
+        pulse1_position = fake.commands.index("RP PMU1-1, 0")
+        pulse2_position = fake.commands.index("RP PMU1-2, 0")
+        self.assertLess(reset_position, smu1_position)
+        self.assertLess(reset_position, smu2_position)
+        self.assertLess(smu1_position, execute_position)
+        self.assertLess(smu2_position, execute_position)
+        self.assertLess(execute_position, pulse1_position)
+        self.assertLess(execute_position, pulse2_position)
+
+    def test_direct_channels_do_not_send_rpm_commands(self):
+        fake = FakeKxci()
+
+        run_linear_voltage_sweep(
+            fake,
+            sweep_channel=4,
+            bias_channel=3,
+            available_channels=(1, 2, 3, 4),
+            smu_connections=self.CONNECTIONS,
+            start=0,
+            stop=0.1,
+            step=0.1,
+            timeout_s=1,
+        )
+
+        self.assertFalse(any(command.startswith("RP ") for command in fake.commands))
+
+    def test_mixed_direct_and_rpm_run_switches_only_the_rpm_channel(self):
+        fake = FakeKxci()
+
+        run_linear_voltage_sweep(
+            fake,
+            sweep_channel=3,
+            bias_channel=1,
+            available_channels=(1, 2, 3, 4),
+            smu_connections=self.CONNECTIONS,
+            start=0,
+            stop=0.1,
+            step=0.1,
+            timeout_s=1,
+        )
+
+        rp_commands = [command for command in fake.commands if command.startswith("RP ")]
+        self.assertEqual(rp_commands, ["RP PMU1-1, 2", "RP PMU1-1, 0"])
+
+    def test_explicit_connections_require_every_active_channel(self):
+        with self.assertRaisesRegex(ValueError, "SMU2"):
+            normalize_smu_connections(
+                {1: "rpm:PMU1-1"},
+                active_channels=(1, 2),
+            )
+
+    def test_duplicate_rpm_target_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "same RPM"):
+            normalize_smu_connections(
+                {1: "rpm:PMU1-1", 2: "rpm:PMU1-1"},
+                active_channels=(1, 2),
+            )
+
+    def test_rpm_helpers_use_documented_modes(self):
+        fake = FakeKxci()
+        targets = connect_smus_to_probes(
+            fake,
+            (1,),
+            {1: "rpm:PMU1-1"},
+        )
+        restore_rpms_to_pulse(fake, targets)
+        self.assertEqual(
+            [command for command in fake.commands if command.startswith("RP ")],
+            ["RP PMU1-1, 2", "RP PMU1-1, 0"],
+        )
+
     def test_setup_error_aborts_and_disables_channels(self):
         fake = FakeKxci(error="KXCI command error. (-992)")
 
@@ -81,7 +193,8 @@ class SmuSystemModeTests(unittest.TestCase):
             )
 
         self.assertNotIn("ME1", fake.commands)
-        self.assertIn("ME4", fake.commands)
+        # No measurement was started, so setup cleanup must not issue ME4.
+        self.assertNotIn("ME4", fake.commands)
         for channel in (1, 2, 3, 4):
             self.assertIn(f"CH{channel}", fake.commands)
 
@@ -97,7 +210,51 @@ class SmuSystemModeTests(unittest.TestCase):
                     timeout_s=0.5,
                     poll_interval_s=0,
                 )
-        self.assertEqual(fake.commands[-2:], ["MD", "ME4"])
+        self.assertEqual(fake.commands[-1], "ME4")
+        self.assertEqual(fake.commands.count("MD"), 1)
+        self.assertEqual(fake.commands.count("ME4"), 1)
+
+    def test_auto_timeout_scales_for_dense_quiet_sweep(self):
+        timeout_s = estimate_smu_timeout_s(
+            1201,
+            sweep_delay=0.02,
+            integration="IT3",
+        )
+        self.assertGreater(timeout_s, 300.0)
+        self.assertAlmostEqual(timeout_s, 852.66, places=2)
+
+    def test_auto_timeout_keeps_short_sweep_minimum(self):
+        self.assertEqual(
+            estimate_smu_timeout_s(11, sweep_delay=0.02, integration="IT1"),
+            300.0,
+        )
+
+    def test_none_disables_overall_test_deadline(self):
+        self.assertIsNone(resolve_smu_timeout_s(None, point_count=1201))
+        self.assertIsNone(resolve_smu_timeout_s("off", point_count=1201))
+
+    def test_timeout_does_not_switch_an_uncertain_output_back_to_pulse(self):
+        fake = FakeKxci(status="16")
+        with mock.patch(
+            "src.smu.system_mode.time.monotonic",
+            side_effect=(0.0, 1.0),
+        ):
+            with self.assertRaises(TimeoutError):
+                run_linear_voltage_sweep(
+                    fake,
+                    sweep_channel=2,
+                    bias_channel=1,
+                    available_channels=(1, 2, 3, 4),
+                    smu_connections=self.CONNECTIONS,
+                    start=0,
+                    stop=0.1,
+                    step=0.1,
+                    timeout_s=0.5,
+                )
+        self.assertIn("RP PMU1-1, 2", fake.commands)
+        self.assertIn("RP PMU1-2, 2", fake.commands)
+        self.assertNotIn("RP PMU1-1, 0", fake.commands)
+        self.assertNotIn("RP PMU1-2, 0", fake.commands)
 
     def test_sweep_point_limit_is_checked_before_hardware(self):
         self.assertEqual(linear_sweep_point_count(0, 1, 0.1), 11)
@@ -157,6 +314,85 @@ class SmuDataTests(unittest.TestCase):
             data = retrieve_variables(fake, ("I1",), expected_point_count=2)
         self.assertEqual(list(data["I1_Status"]), ["N", "C"])
 
+    def test_plot_data_has_stable_columns_and_absolute_currents(self):
+        raw = pd.DataFrame(
+            {
+                "CommandedVoltage": [0.0, 0.1],
+                "V1": [0.0, 0.099],
+                "I1": [-1e-7, 2e-7],
+                "I1_Status": ["N", "N"],
+                "V2": [0.0, 1e-6],
+                "I2": [1.1e-7, -1.9e-7],
+                "I2_Status": ["N", "N"],
+            }
+        )
+
+        plot_data = build_plot_data(raw)
+
+        self.assertEqual(
+            list(plot_data.columns),
+            ["CommandedVoltage", "V1", "I1", "AbsI1", "V2", "I2", "AbsI2"],
+        )
+        self.assertEqual(list(plot_data["AbsI1"]), [1e-7, 2e-7])
+        self.assertEqual(list(plot_data["AbsI2"]), [1.1e-7, 1.9e-7])
+
+    def test_workbook_separates_raw_plot_data_and_parameters(self):
+        raw = pd.DataFrame(
+            {
+                "CommandedVoltage": [0.0, 0.1],
+                "V1": [0.0, 0.099],
+                "I1": [-1e-7, 2e-7],
+                "I1_Status": ["N", "C"],
+                "V2": [0.0, 1e-6],
+                "I2": [1.1e-7, -1.9e-7],
+                "I2_Status": ["N", "N"],
+            }
+        )
+        plot_data = build_plot_data(raw)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "smu.xlsx"
+            save_workbook(output, raw, {"step": 0.1}, plot_data=plot_data)
+            with pd.ExcelFile(output) as workbook:
+                self.assertEqual(
+                    workbook.sheet_names,
+                    ["Raw", "PlotData", "Parameters"],
+                )
+                saved_raw = pd.read_excel(workbook, sheet_name="Raw")
+                saved_plot = pd.read_excel(workbook, sheet_name="PlotData")
+
+        self.assertIn("I1_Status", saved_raw.columns)
+        self.assertNotIn("I1_Status", saved_plot.columns)
+        self.assertEqual(
+            list(saved_plot.columns),
+            ["CommandedVoltage", "V1", "I1", "AbsI1", "V2", "I2", "AbsI2"],
+        )
+
+
+class SmuPlotTests(unittest.TestCase):
+    def test_log_axis_tick_labels_show_current_values(self):
+        self.assertEqual(format_log_current_tick(1e-7), "1e-7")
+        self.assertEqual(format_log_current_tick(1e-6), "1e-6")
+        self.assertEqual(format_log_current_tick(2e-7), "")
+
+    def test_current_plots_are_created(self):
+        data = pd.DataFrame(
+            {
+                "V1": [-0.1, 0.0, 0.1],
+                "I1": [-1e-7, 1e-8, 1e-6],
+            }
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "smu.xlsx"
+            iv_path, log_path = save_current_plots(
+                data,
+                output,
+                voltage_column="V1",
+                current_column="I1",
+            )
+            self.assertGreater(iv_path.stat().st_size, 0)
+            self.assertGreater(log_path.stat().st_size, 0)
+
 
 class SmuUserModeTests(unittest.TestCase):
     def test_source_voltage_checks_kxci_error_queue(self):
@@ -171,7 +407,55 @@ class SmuUserModeTests(unittest.TestCase):
         self.assertEqual(fake.commands, [])
 
 
+class SharedTransportTests(unittest.TestCase):
+    def test_transport_supports_both_query_and_explicit_io_then_closes_all_resources(self):
+        instrument = mock.Mock()
+        instrument.write.return_value = 4
+        instrument.read.return_value = "READ"
+        instrument.query.return_value = "ACK\n"
+        resource_manager = mock.Mock()
+        resource_manager.open_resource.return_value = instrument
+
+        with mock.patch(
+            "src.transport.visa.ResourceManager",
+            return_value=resource_manager,
+        ):
+            client = Communications("TCPIP0::example::1225::SOCKET")
+            client.connect(timeout=1234)
+            self.assertEqual(client.write("CMD"), 4)
+            self.assertEqual(client.read(), "READ")
+            self.assertEqual(client.query("QUERY"), "ACK")
+            client.close()
+
+        resource_manager.open_resource.assert_called_once_with(
+            "TCPIP0::example::1225::SOCKET"
+        )
+        self.assertEqual(instrument.timeout, 1234)
+        self.assertTrue(instrument.send_end)
+        instrument.close.assert_called_once_with()
+        resource_manager.close.assert_called_once_with()
+
+
 class SmuSessionTests(unittest.TestCase):
+    def test_pmu_connection_setup_failure_uses_shared_transport_cleanup(self):
+        class BadInstrument:
+            @property
+            def write_termination(self):
+                return None
+
+            @write_termination.setter
+            def write_termination(self, value):
+                raise RuntimeError("termination setup failed")
+
+        client = mock.Mock()
+        client._instrument_object = BadInstrument()
+        with mock.patch("src.pmu.session.Communications", return_value=client):
+            session = PMUSession("TCPIP0::example::SOCKET")
+            with self.assertRaisesRegex(RuntimeError, "termination setup failed"):
+                session.connect()
+        client.close.assert_called_once_with()
+        self.assertIsNone(session.client)
+
     def test_connection_setup_failure_closes_all_visa_resources(self):
         class BadInstrument:
             @property

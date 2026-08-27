@@ -19,14 +19,16 @@ import sys
 
 import pandas as pd
 
-PKG_ROOT = Path(__file__).resolve().parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+PKG_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from debug.waveform_preview import preview_sequence_configs
-from src.data_processing import read_both_channels
-from src.pmu_tests import execute_segARB_test, power_off_outputs
-from src.session import PMUSession
+from src.pmu.data_processing import read_both_channels
+from src.pmu.pmu_tests import execute_segARB_test, power_off_outputs
+from src.pmu.session import PMUSession
 from route_config import apply_route_config
 
 

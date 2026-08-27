@@ -5,10 +5,12 @@ import unittest
 
 
 PKG_ROOT = Path(__file__).resolve().parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
-from src.pmu_tests import _apply_common_pmu_options
+from src.pmu.pmu_tests import _apply_common_pmu_options
 
 
 FE_CAP_ROOT = PKG_ROOT / "Fe_cap"
@@ -37,6 +39,21 @@ def segarb_options_literal(tree):
 
 
 class CommonPmuLoadTests(unittest.TestCase):
+    def test_sample_rate_is_applied_and_validated(self):
+        commands = []
+        _apply_common_pmu_options(
+            commands.append,
+            (1, 2),
+            options={"SAMPLE_RATE": 10e6},
+        )
+        self.assertEqual(commands, [":PMU:SAMPLE:RATE 10000000"])
+        with self.assertRaisesRegex(ValueError, "SAMPLE_RATE"):
+            _apply_common_pmu_options(
+                commands.append,
+                (1, 2),
+                options={"SAMPLE_RATE": 500},
+            )
+
     def test_uniform_load_is_applied_to_every_active_channel(self):
         commands = []
         _apply_common_pmu_options(

@@ -7,14 +7,52 @@ import pandas as pd
 
 
 PKG_ROOT = Path(__file__).resolve().parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from Fe_cap import endurance
-from src.pmu_tests import configure_segARB_sequence
+from src.pmu.pmu_tests import (
+    MAX_SEGMENTS_PER_SEQUENCE,
+    _validate_segment_arb_storage,
+    configure_segARB_sequence,
+)
 
 
 class SegmentArbMeasurementWindowTests(unittest.TestCase):
+    def test_multiple_sequences_share_limit_per_channel_not_between_channels(self):
+        segment_count = MAX_SEGMENTS_PER_SEQUENCE // 2
+        sequence = (1, [0.0] * segment_count, [0.0] * segment_count,
+                    [1e-5] * segment_count)
+        second_sequence = (2, sequence[1], sequence[2], sequence[3])
+
+        # Both channels may independently use all 2048 stored segments.
+        _validate_segment_arb_storage(
+            {1: [sequence, second_sequence], 2: [sequence, second_sequence]}
+        )
+
+        extra = (3, [0.0], [0.0], [1e-5])
+        with self.assertRaisesRegex(ValueError, "per-channel 4225-PMU limit"):
+            _validate_segment_arb_storage(
+                {1: [sequence, second_sequence, extra], 2: [sequence]}
+            )
+
+    def test_sequence_above_hardware_segment_limit_is_rejected(self):
+        commands = []
+        values = [0.0] * (MAX_SEGMENTS_PER_SEQUENCE + 1)
+        with self.assertRaisesRegex(ValueError, "4225-PMU limit"):
+            configure_segARB_sequence(
+                commands.append,
+                1,
+                1,
+                values,
+                values,
+                [1e-5] * len(values),
+                [0] * len(values),
+            )
+        self.assertEqual(commands, [])
+
     def test_unmeasured_segments_are_sent_with_zero_windows(self):
         commands = []
         configure_segARB_sequence(

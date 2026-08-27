@@ -3,21 +3,103 @@
 
 from pathlib import Path
 import sys
+import time
 
 PKG_ROOT = Path(__file__).resolve().parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
-from src.data_processing import (
+from src.pmu.data_processing import (
     add_resistance_columns,
     merge_channels,
     read_both_channels,
     save_channels_separate_excel,
     select_pulse_iv_level,
 )
-from src.plotting_utils import PlotManager, plot_time_series
-from src.pmu_tests import dual_channel_sweep_train, power_off_outputs
-from src.session import PMUSession
+from src.pmu.plotting_utils import PlotManager, plot_time_series
+from src.pmu.pmu_tests import (
+    _apply_common_pmu_options,
+    _configure_pulse_iv_acquisition,
+    _get_mode_num,
+    power_off_outputs,
+)
+from src.pmu.session import PMUSession
+
+
+def run_dual_channel_sweep_train(query, ch1, ch2, parameters, mode="D"):
+    """Configure and run this entry's sweep-plus-pulse-train waveform."""
+    mode_number = _get_mode_num(mode)
+    mode_names = {
+        0: "no measurement",
+        1: "spot measurement",
+        2: "waveform measurement",
+        3: "averaged spot measurement",
+        4: "averaged waveform measurement",
+    }
+    print(
+        "Configuring two-channel sweep plus pulse train - "
+        f"mode {mode_number}: {mode_names[mode_number]}"
+    )
+
+    query(":PMU:INIT 0")
+    query(f":PMU:RPM:CONFIGURE PMU1-{ch1}, 0")
+    query(f":PMU:RPM:CONFIGURE PMU1-{ch2}, 0")
+    _apply_common_pmu_options(query, (ch1, ch2), options=parameters)
+
+    query(f":PMU:MEASURE:MODE {mode_number}")
+    query(f":PMU:MEASURE:RANGE {ch2}, 2, {parameters['CH2_RANGE']}")
+    query(
+        f":PMU:PULSE:TRAIN {ch2}, "
+        f"{parameters['CH2_BASE']}, {parameters['CH2_AMPLITUDE']}"
+    )
+    query(
+        f":PMU:PULSE:TIMES {ch2}, {parameters['CH2_PERIOD']}, "
+        f"{parameters['CH2_WIDTH']}, {parameters['CH2_RISE']}, "
+        f"{parameters['CH2_FALL']}, {parameters['CH2_DELAY']}"
+    )
+    query(f":PMU:MEASURE:RANGE {ch1}, 2, {parameters['CH1_RANGE']}")
+    query(
+        f":PMU:SWEEP:PULSE:AMPLITUDE {ch1}, {parameters['CH1_START']}, "
+        f"{parameters['CH1_STOP']}, {parameters['CH1_STEP']}, "
+        f"{parameters['CH1_VBASE']}, {parameters['CH1_DUALSWEEP']}"
+    )
+    query(
+        f":PMU:PULSE:TIMES {ch1}, {parameters['CH1_PERIOD']}, "
+        f"{parameters['CH1_WIDTH']}, {parameters['CH1_RISE']}, "
+        f"{parameters['CH1_FALL']}, {parameters['CH1_DELAY']}"
+    )
+
+    # Preserve the original command ordering used by this tested entry.
+    query(f":PMU:MEASURE:MODE {mode_number}")
+    if mode_number in (1, 3):
+        _configure_pulse_iv_acquisition(query, (ch1, ch2), parameters)
+        query(
+            f":PMU:TIMES:PIV {ch1}, "
+            f"{parameters['MEASURE_START_D']}, {parameters['MEASURE_STOP_D']}"
+        )
+        query(
+            f":PMU:TIMES:PIV {ch2}, "
+            f"{parameters['MEASURE_START_D']}, {parameters['MEASURE_STOP_D']}"
+        )
+    elif mode_number in (2, 4):
+        query(
+            f":PMU:TIMES:WAVEFORM {ch1}, "
+            f"{parameters['MEASURE_START_W']}, {parameters['MEASURE_STOP_W']}"
+        )
+        query(
+            f":PMU:TIMES:WAVEFORM {ch2}, "
+            f"{parameters['MEASURE_START_W']}, {parameters['MEASURE_STOP_W']}"
+        )
+
+    query(f":PMU:PULSE:BURST:COUNT {parameters['PULSE_COUNT']}")
+    query(f":PMU:OUTPUT:STATE {ch1}, 1")
+    query(f":PMU:OUTPUT:STATE {ch2}, 1")
+    query(":PMU:EXECUTE")
+
+    while int(query(":PMU:TEST:STATUS?")) != 0:
+        time.sleep(0.3)
 
 params = dict(
     CH1_START=-2,
@@ -68,7 +150,7 @@ fname_base = f"2C_SweepTrain_mode{TEST_MODE}_{width_us}us_{params['CH1_START']}t
 with PMUSession(INST, channels=(CH1, CH2)) as session:
     Q = session.query
     print("Running sweep + pulse train...")
-    dual_channel_sweep_train(Q, CH1, CH2, params, mode=TEST_MODE)
+    run_dual_channel_sweep_train(Q, CH1, CH2, params, mode=TEST_MODE)
     pulse_iv = None
     if TEST_MODE in (1, 3):
         pulse_iv = (params["ACQUIRE_HIGH"], params["ACQUIRE_LOW"])

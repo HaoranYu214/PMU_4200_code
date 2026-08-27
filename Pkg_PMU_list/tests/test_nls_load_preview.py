@@ -1,21 +1,18 @@
 import ast
-from contextlib import redirect_stdout
-import io
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 
 
 PKG_ROOT = Path(__file__).resolve().parents[1]
-NLS_ROOT = PKG_ROOT / "NLS"
-for path in (PKG_ROOT, NLS_ROOT):
+REPO_ROOT = PKG_ROOT.parent
+MEASUREMENT_ROOT = PKG_ROOT / "Programed_measuremnts"
+for path in (PKG_ROOT, MEASUREMENT_ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
 import NLS_1C_switch as nls_switch
-from src import pmu_tests
 
 
 REQUIRED_OPTIONS = {
@@ -36,19 +33,45 @@ def assignment_literal(tree, name):
 
 
 class NlsSequenceTests(unittest.TestCase):
-    def test_promoted_sequence_matches_the_legacy_hardware_helper(self):
-        with patch.object(pmu_tests, "execute_segARB_test") as execute:
-            with redirect_stdout(io.StringIO()):
-                pmu_tests.hy_NISswitch_segARB(
-                    lambda _command: None,
-                    1,
-                    2,
-                    nls_switch.PARAMS,
-                )
-        legacy_configs = execute.call_args.args[2]
+    def test_entry_owns_the_exact_nls_waveform(self):
+        params = nls_switch.PARAMS
+        configs = nls_switch.make_nls_seq_configs(1, 2, params)
+        ch1_config = configs[1][0]
+
+        offset = params["offset"]
+        vp = params["Vp"]
+        vsquare = params["Vsquare"]
         self.assertEqual(
-            nls_switch.make_nls_seq_configs(1, 2, nls_switch.PARAMS),
-            legacy_configs,
+            ch1_config[1],
+            [
+                0, 0, offset, -vp + offset, offset,
+                offset, vsquare + offset, vsquare + offset, offset,
+                offset, vp + offset, offset, offset, vp + offset,
+            ],
+        )
+        self.assertEqual(
+            ch1_config[2],
+            [
+                0, offset, -vp + offset, offset, offset,
+                vsquare + offset, vsquare + offset, offset, offset,
+                vp + offset, offset, offset, vp + offset, offset,
+            ],
+        )
+        self.assertEqual(
+            ch1_config[3],
+            [
+                params["Rt_p"], params["Rt_p"], params["Rt_p"],
+                params["Rt_p"], params["Delaytime"], params["Rt_s"],
+                params["Dwell"], params["Rt_s"], params["Delaytime"],
+                params["Rt_p"], params["Rt_p"], params["Delaytime"],
+                params["Rt_p"], params["Rt_p"],
+            ],
+        )
+        square_measurement = 2 if params.get("MeasureSquare", True) else 0
+        self.assertEqual(
+            ch1_config[4],
+            [0, 0, 0, 0, 0, square_measurement, square_measurement,
+             square_measurement, 0, 2, 2, 0, 2, 2],
         )
 
     def test_sequence_has_the_expected_two_aligned_14_segment_channels(self):
@@ -73,7 +96,7 @@ class NlsSequenceTests(unittest.TestCase):
 
 class NlsEntryWiringTests(unittest.TestCase):
     def test_single_entry_exposes_options_and_passes_them_to_execute(self):
-        path = NLS_ROOT / "NLS_1C_switch.py"
+        path = MEASUREMENT_ROOT / "NLS_1C_switch.py"
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
         options = assignment_literal(tree, "SEGARB_OPTIONS")
@@ -92,7 +115,7 @@ class NlsEntryWiringTests(unittest.TestCase):
         self.assertIn("PREVIEW_ONLY", source)
 
     def test_sweep_entry_exposes_options_and_preview(self):
-        path = NLS_ROOT / "NLS_1C_switch_list.py"
+        path = MEASUREMENT_ROOT / "NLS_1C_switch_list.py"
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
         options = assignment_literal(tree, "SEGARB_OPTIONS")

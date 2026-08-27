@@ -8,10 +8,12 @@ import sys
 import pandas as pd
 
 PKG_ROOT = Path(__file__).resolve().parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
-from src.fet_three_terminal_common import (
+from src.pmu.fet_three_terminal_common import (
     add_derived_fet_columns,
     execute_program_read_with_software_delay,
     report_last_error,
@@ -25,9 +27,9 @@ from debug.waveform_preview import (
     save_ids_dual_axis_plot,
     sequence_configs_to_dataframe,
 )
-from src.data_processing import read_both_channels
-from src.pmu_tests import execute_segARB_test, power_off_outputs
-from src.session import PMUSession
+from src.pmu.data_processing import read_both_channels
+from src.pmu.pmu_tests import execute_segARB_test, power_off_outputs
+from src.pmu.session import PMUSession
 
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"

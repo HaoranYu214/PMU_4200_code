@@ -14,8 +14,10 @@ import pandas as pd
 
 
 PKG_ROOT = Path(__file__).resolve().parents[1]
-if str(PKG_ROOT) not in sys.path:
-    sys.path.insert(0, str(PKG_ROOT))
+REPO_ROOT = PKG_ROOT.parent
+for path in (PKG_ROOT, REPO_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -28,8 +30,8 @@ except ImportError:
 
 # Edit these lists to define the Cartesian parameter sweep.
 # VP_VALUES = [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]
-VP_VALUES = [5]
-FREQUENCY_VALUES_HZ = [125, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
+VP_VALUES = [2.5,3,3.5,4,4.5]
+FREQUENCY_VALUES_HZ = [125, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000]
 # Use a short nonzero segment for the practical "no delay" case.
 DELAY_TIME_VALUES_S = [1e-2]
 
@@ -40,12 +42,12 @@ SETTLE_TIME_S = 0.5
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": True,
-    "LOAD_RESISTANCE": 1e6,
+    "LOAD_RESISTANCE": 1e3,
     "ENABLE_LLEC": False,
 }
 
 SAVE_ROOT = Path(
-    r"C:\Users\P317151\Documents\data\11-06-2026\03D2\L40um1\FE\parameter_sweep\frequency_5V_1e-2s_delay"
+    r"C:\Users\P317151\Documents\data\25-08-2026\03B4_hZO_2700_800\L20_4\PV and PUND"
 )
 SUMMARY_CSV = SAVE_ROOT / "sweep_summary_live.csv"
 
