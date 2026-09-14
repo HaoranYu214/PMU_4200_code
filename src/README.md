@@ -1,13 +1,7 @@
-# Shared Keithley source library
+# Python 源码目录
 
-The reusable instrument code is divided by hardware command family:
+src 是安装时的源码根目录，[keithley4200](keithley4200/README.md) 是实际包名。保留这一层后，代码统一用 from keithley4200... 导入，避免顶层 pmu/tools 与其他库重名。
 
-- `pmu/`: 4225-PMU sessions, Segment Arb execution, data processing,
-  current-range helpers, plotting, and shared FET pulse helpers.
-- `smu/`: SMU System Mode, User Mode, RPM routing, data processing, plotting,
-  and sessions.
-- `transport.py`: the single shared PyVISA communication implementation used
-  by both packages.
+在仓库根目录运行 python -m pip install -e . 可做可编辑安装。测量入口会加入 src 路径，通常也可直接运行。实际实验参数在 [measurements](../measurements/README.md)，多步任务在 [workflows](../workflows/README.md)。
 
-Runnable experiment parameters and waveforms remain outside `src`; this
-directory contains reusable mechanisms rather than experiment protocols.
+参数依据：[手册限制与模式速查](../reference/manuals/PARAMETER_LIMITS.md)。
