@@ -54,35 +54,9 @@ FILE_STEM_PREFIX = "ftj_endurance"
 def load_ftj_module(module_name=TARGET_MODULE_NAME):
     """Import one maintained FTJ measurement module without opening VISA."""
     module = importlib.import_module(module_name)
-    if not callable(getattr(module, "configure_measurement", None)):
-        raise TypeError(f"{module_name} does not provide configure_measurement(...).")
-    if not callable(getattr(module, "run_ftj_test", None)):
-        raise TypeError(f"{module_name} does not provide run_ftj_test(...).")
+    if not callable(getattr(module, "run_test", None)):
+        raise TypeError(f"{module_name} does not provide run_test(...).")
     return module
-
-
-def configure_target(
-    module,
-    *,
-    param_overrides=None,
-    inst=None,
-    channels=None,
-    current_ranges=None,
-    segarb_options=None,
-    save_dir=None,
-):
-    """Merge optional endurance overrides, then rebuild the target waveform."""
-    configured_params = dict(module.params)
-    configured_params.update(param_overrides or {})
-    module.configure_measurement(
-        params_override=configured_params,
-        inst=inst,
-        channels=channels,
-        current_ranges=current_ranges,
-        segarb_options=segarb_options,
-        save_dir=save_dir,
-    )
-    return configured_params
 
 
 def make_summary_row(run_index, status, start_time, end_time, output_path, error_text):
@@ -138,17 +112,8 @@ def run_endurance(
     save_dir = prepare_output_dir(save_dir)
     summary_stem, run_time = reserve_summary_stem(save_dir, "endurance_summary")
     summary_csv = Path(f"{summary_stem}_live.csv")
-    configure_target(
-        module,
-        param_overrides=(
-            TARGET_PARAM_OVERRIDES if param_overrides is None else param_overrides
-        ),
-        inst=inst,
-        channels=channels,
-        current_ranges=current_ranges,
-        segarb_options=segarb_options,
-        save_dir=save_dir,
-    )
+    configured_params = dict(module.params)
+    configured_params.update(TARGET_PARAM_OVERRIDES if param_overrides is None else param_overrides)
 
     summary_rows = []
     for run_index in range(1, int(loop_count) + 1):
@@ -161,7 +126,10 @@ def run_endurance(
         error_text = ""
         status = "ok"
         try:
-            result = module.run_ftj_test(
+            result = module.run_test(
+                params_override=configured_params, inst=inst, channels=channels,
+                current_ranges=current_ranges, segarb_options=segarb_options,
+                preview_only=False,
                 save_results=bool(save_every_run),
                 save_dir=save_dir,
                 file_stem=file_stem_prefix,

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # 4225-PMU command and test helpers.
 """
-PMU核心测试模块 - segARB配置、执行、设备控制
+PMU Segment Arb configuration, execution, and output control.
 """
 
 import time
@@ -26,10 +26,10 @@ KXCI_MAX_DATA_POINTS = 65_536
 KXCI_DEFAULT_SAMPLE_RATE = 200e6
 
 
-# === 设备控制 ===
+# === Output control ===
 
 def power_off_outputs(Q, channels):
-    """测试数据读取后立刻关闭输出（幂等）"""
+    """Best-effort output shutdown after readout; safe to call repeatedly."""
     for ch in channels:
         try:
             Q(f":PMU:OUTPUT:STATE {ch}, 0")
@@ -37,7 +37,7 @@ def power_off_outputs(Q, channels):
             pass
 
 
-# === segARB 核心配置 ===
+# === Segment Arb configuration ===
 
 # Shared options (KXCI Rev. D, May 2024; printed page numbers):
 # SOURCE:RANGE selects 10 or 40 V; INIT defaults to 10 V (7-24).
@@ -160,6 +160,48 @@ def _normalize_seg_arb_measurements(time_values, meas_types=None, meas_start=Non
     return modes, starts, stops
 
 
+SSR_TRANSITION_MIN_S = 25e-6
+
+
+def normalize_ssr(time_values, ssr=None, initial_state=None):
+    """Validate optional per-segment HEOR states (KXCI 7-46/7-47).
+
+    None sends no SSR command; reset defaults are closed (1). Explicit arrays
+    use 0=open/isolated and 1=closed. A segment containing a relay transition
+    must last at least 25 us. initial_state is supplied when execution order
+    is known; configuration alone only checks internal transitions.
+    """
+    if ssr is None:
+        return None
+    states = list(ssr)
+    if len(states) != len(time_values) or not states:
+        raise ValueError("SSR must contain one 0/1 value per segment.")
+    if any(value not in (0, 1) for value in states):
+        raise ValueError("SSR values must be 0 (open) or 1 (closed).")
+    previous = initial_state
+    for duration, state in zip(time_values, states):
+        if previous is not None and state != previous and not float(duration) >= SSR_TRANSITION_MIN_S:
+            raise ValueError("An SSR transition segment must last at least 25 us.")
+        previous = state
+    return [int(value) for value in states]
+
+
+def validate_ssr_execution(seq_configs, seq_list=None):
+    """Check initial, sequence-boundary and repeat-boundary SSR transitions."""
+    for channel, configs in seq_configs.items():
+        if not any(len(c) > 7 and c[7] is not None for c in configs):
+            continue
+        lookup = {c[0]: c for c in configs}
+        previous = 1
+        for sid, loops in (seq_list or {}).get(channel, [(1, 1)]):
+            cfg = lookup[sid]
+            states = cfg[7] if len(cfg) > 7 and cfg[7] is not None else [1]*len(cfg[3])
+            normalize_ssr(cfg[3], states, previous)
+            if int(loops) > 1:
+                normalize_ssr(cfg[3], states, states[-1])
+            previous = states[-1]
+
+
 # Segment Arb parameter limits (KXCI 7-40, 7-42, 7-48, 7-50, 7-52):
 # Voltage endpoints: -10..10 V on the 10 V range, -40..40 V on the 40 V range.
 # Include offsets when checking actual levels; adjacent segment voltages must join.
@@ -170,8 +212,8 @@ def _normalize_seg_arb_measurements(time_values, meas_types=None, meas_start=Non
 # are 1-1e12 (7-56). Not every manual boundary is validated by this helper.
 # These are instrument command bounds, not a verified safe operating area for a DUT.
 def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time_values,
-                              meas_types=None, meas_start=None, meas_stop=None):
-    """通用segARB序列配置函数，支持长数组自动用 :ADD 续传。"""
+                              meas_types=None, meas_start=None, meas_stop=None, ssr=None):
+    """Configure a sequence, splitting long arrays into command/:ADD chunks."""
     n_segments = len(start_voltages)
     if n_segments > MAX_SEGMENTS_PER_SEQUENCE:
         raise ValueError(
@@ -194,16 +236,21 @@ def configure_segARB_sequence(Q, ch, seq_id, start_voltages, stop_voltages, time
         meas_stop,
     )
 
+    ssr = normalize_ssr(time_values, ssr)
     _send_sarb_array(Q, ":PMU:SARB:SEQ:STARTV", ch, seq_id, start_voltages)
     _send_sarb_array(Q, ":PMU:SARB:SEQ:STOPV", ch, seq_id, stop_voltages)
-    _send_sarb_array(Q, ":PMU:SARB:SEQ:TIME", ch, seq_id, time_values, formatter=lambda value: f"{value:.2e}")
+    # Preserve sub-microsecond differences; hardware applies its 10 ns resolution.
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:TIME", ch, seq_id, time_values, formatter=lambda value: f"{value:.12g}")
     _send_sarb_array(Q, ":PMU:SARB:SEQ:MEAS:TYPE", ch, seq_id, meas_types)
-    _send_sarb_array(Q, ":PMU:SARB:SEQ:MEAS:START", ch, seq_id, meas_start, formatter=lambda value: f"{value:.2e}")
-    _send_sarb_array(Q, ":PMU:SARB:SEQ:MEAS:STOP", ch, seq_id, meas_stop, formatter=lambda value: f"{value:.2e}")
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:MEAS:START", ch, seq_id, meas_start, formatter=lambda value: f"{value:.12g}")
+    _send_sarb_array(Q, ":PMU:SARB:SEQ:MEAS:STOP", ch, seq_id, meas_stop, formatter=lambda value: f"{value:.12g}")
+
+    if ssr is not None:
+        _send_sarb_array(Q, ":PMU:SARB:SEQ:SSR", ch, seq_id, ssr)
 
 
 def auto_align_channels(seq_configs):
-    """智能通道对齐：当一通道复杂时序，另一通道恒压时，自动扩展对齐"""
+    """Expand an unmeasured constant companion to match the reference timing."""
     seq_ids = set()
     for _, configs in seq_configs.items():
         for config in configs:
@@ -234,9 +281,17 @@ def auto_align_channels(seq_configs):
             ):
                 continue
             start_v, stop_v = ch_configs[ch][1], ch_configs[ch][2]
-            is_const = all(abs(a-b) < 1e-12 for a, b in zip(start_v, stop_v))
+            is_const = bool(len(start_v)) and all(
+                abs(value - start_v[0]) < 1e-12
+                for values in (start_v, stop_v) for value in values
+            )
             if not is_const:
-                raise ValueError(f"CH{ch} 非恒压序列，且与CH{ref_ch}段数不一致，无法自动对齐")
+                raise ValueError(f"CH{ch} is not constant and its timing differs from CH{ref_ch}; cannot auto-align.")
+            original_ssr = ch_configs[ch][7] if len(ch_configs[ch]) > 7 else None
+            if original_ssr is not None:
+                original_ssr = normalize_ssr(channel_time, original_ssr)
+                if len(set(original_ssr)) != 1:
+                    raise ValueError("Cannot auto-align changing SSR states; provide aligned arrays explicitly.")
             v = start_v[0] if len(start_v) else 0.0
             # An expanded hold waveform is deliberately unmeasured.
             zeros = [0.0] * len(ref_time)
@@ -249,6 +304,8 @@ def auto_align_channels(seq_configs):
                 zeros.copy(),
                 zeros.copy(),
             )
+            if original_ssr is not None:
+                new_config += ([original_ssr[0]] * len(ref_time),)
             for i, cfg in enumerate(seq_configs[ch]):
                 if cfg[0] == seq_id:
                     seq_configs[ch][i] = new_config
@@ -281,6 +338,7 @@ def validate_segment_arb_configs(seq_configs):
                 raise ValueError(
                     f"CH{channel} seq {seq_id} has mismatched voltage/time arrays."
                 )
+            normalize_ssr(time_values, config[7] if len(config) > 7 else None)
             _normalize_seg_arb_measurements(
                 time_values,
                 config[4] if len(config) > 4 else None,
@@ -290,38 +348,43 @@ def validate_segment_arb_configs(seq_configs):
 
 
 def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=None, options=None):
-    """
-    通用segARB测试执行函数
-    Args:
-        Q: 查询函数
-        channels: 通道列表 [CH1, CH2, ...]
-        seq_configs: 序列配置字典 {ch: [(seq_id, start_v, stop_v, time_v), ...]}
-        seq_list: 序列执行列表 {ch: [(seq_id, loop_count), ...]} (默认执行seq1一次)
-        wait_completion: 是否等待测试完成
-        current_ranges: 电流测量范围字典 {ch: range_value} (在初始化后设置)
-    
-    注意: 同一PMU上的所有通道必须使用相同的时间序列，因为它们共享同一个时钟
+    """Configure, start, and synchronously wait for a Segment Arb acquisition.
+
+    Q sends a KXCI command and returns its response. channels selects PMU1
+    outputs. seq_configs maps each channel to tuples containing seq_id,
+    start/stop voltages, times, optional measurement type/start/stop arrays,
+    and optional SSR. Measurement modes are 0=none, 1=spot discrete,
+    2=waveform discrete, 3=spot average, 4=waveform average (KXCI 7-44).
+    seq_list maps channels to (sequence_id, loop_count) pairs; omission runs
+    sequence 1 once. current_ranges maps channels to fixed ranges in amperes.
+    options supplies LOAD, SAMPLE_RATE, LLEC, and connection compensation.
+
+    Channels on one PMU share the timing clock. Polling currently has no
+    elapsed-time limit; Ctrl+C propagates to the session's shutdown handler.
+    This function does not download data or turn outputs off after success:
+    callers read the buffers, then shut down via power_off_outputs/PMUSession.
     """
     # Alignment can expand a constant companion channel. Validate the aligned
     # result before changing any instrument state.
     seq_configs = auto_align_channels(seq_configs)
     validate_segment_arb_configs(seq_configs)
+    validate_ssr_execution(seq_configs, seq_list)
 
     # INIT 1 selects Segment Arb; 0 selects standard pulse mode. INIT resets ranges/sample rate (7-9, 7-23).
     Q(":PMU:INIT 1")
 
-    # 配置RPM,链接RPM到PMU通道
+    # Connect each configured PMU1 channel through its RPM in Pulse mode.
     for ch in channels:
         Q(f":PMU:RPM:CONFIGURE PMU1-{ch}, 0")
 
     _apply_common_pmu_options(Q, channels, options=options)
 
-    # ⚡ 设置测量范围 (必须在 :PMU:INIT 之后设置)
-    # 语法: :PMU:MEASURE:RANGE ch, IRangeType, IMeasRange
+    # Set measurement ranges after INIT, which resets the range settings.
+    # Syntax: :PMU:MEASURE:RANGE ch, IRangeType, IMeasRange
     #   IRangeType: 0=Autorange, 1=Limited autorange, 2=Fixed range
-    #   ⚠️ Segment Arb 模式必须使用 Fixed range (type=2)
+    #   Segment Arb requires fixed range (type=2), not instrument autoranging.
     # 
-    # 可用电流范围 (取决于PMU/RPM型号):
+    # Available current ranges in A depend on PMU/RPM and source range (7-15):
     #   40V PMU:  0.8A, 0.01A, 0.0001A
     #   10V PMU:  0.2A, 0.01A
     #   40V RPM:  0.8A, 0.01A, 0.0001A
@@ -340,7 +403,8 @@ def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=
             meas_start = cfg[5] if len(cfg) > 5 else None
             meas_stop = cfg[6] if len(cfg) > 6 else None
             configure_segARB_sequence(Q, ch, seq_id, start_v, stop_v, time_v,
-                                      meas_types, meas_start, meas_stop)
+                                      meas_types, meas_start, meas_stop,
+                                      ssr=cfg[7] if len(cfg) > 7 else None)
 
     if seq_list is None:
         seq_list = {ch: [(1, 1)] for ch in channels}
@@ -374,7 +438,7 @@ def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=
         time.sleep(0.3)
 
 
-# === 底层测试函数 ===
+# === Standard pulse acquisition helpers ===
 
 # Standard pulse timing differs from SARB dwell segments (KXCI 7-17..7-19):
 # PMU period: 60 ns-1 s at 10 V; 500 ns-1 s at 40 V. All channels share it.
@@ -385,7 +449,7 @@ def execute_segARB_test(Q, channels, seq_configs, seq_list=None, current_ranges=
 # PULSE:TRAIN base-to-peak span is limited to 10/40 V respectively (7-21).
 # A measurement range setting does not provide SMU-style current compliance.
 def _get_mode_num(mode):
-    """解析测量模式"""
+    """Resolve a measurement mode name or numeric code."""
     # Acquisition modes (7-13/7-44): 0 none, 1 spot discrete, 2 waveform discrete,
     # 3 spot average, 4 waveform average. Mode 0 disables acquisition, not pulse output.
     mode_map = {

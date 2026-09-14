@@ -1,4 +1,31 @@
-# 离线回归测试
+# Offline regression tests
+
+[English](#english) | [中文](#中文)
+
+## English
+
+Tests use unittest, fake communication, or temporary directories to check behavior without sending test commands to a real instrument.
+
+- test_smu: SMU commands, readings, shutdown, and RPM routing.
+- test_output_naming: output-group numbering, overwrite protection, and summary timestamps.
+- test_review_fixes / test_tools_package: FET channel mapping, import isolation, synthetic readout, and tool-package startup.
+- test_fe_cap_load_options / test_waveform_ownership: forwarding entry parameters to shared code and keeping waveforms in their owning entries.
+- Other files cover endurance, FORC, NLS, FTJ, and workflow scenarios.
+
+Run from the repository root in PowerShell:
+
+```powershell
+$env:MPLBACKEND = "Agg"
+python -m unittest discover -s tests
+```
+
+Agg removes the GUI requirement for plotting tests. Passing tests does not establish a specific device's safe test range.
+
+Parameter source: [manual limits and mode reference (Chinese)](../reference/manuals/PARAMETER_LIMITS.md).
+
+## 中文
+
+### 离线回归测试
 
 这里使用 unittest、假通信或临时目录验证行为，不向真实仪器发送测试命令。
 

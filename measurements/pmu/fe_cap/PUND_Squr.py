@@ -23,12 +23,14 @@ from keithley4200.pmu.current_range import acquire_with_auto_current_range
 from keithley4200.pmu.data_processing import calculate_polarization, read_both_channels
 from keithley4200.pmu.pmu_tests import execute_segARB_test, power_off_outputs
 from keithley4200.pmu.session import PMUSession
+from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
+from keithley4200.parameter_defaults import remember_current_ranges
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 params = dict(
     rise_time=1e-5,
-    dwell_time=2e-8,
+    dwell_time=1e-5,
     delay_time=1e-5,
     Vp=5,
     offset=0,
@@ -49,23 +51,30 @@ SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\11-06-2026\03D2\L40um1\FE\freq
 PREVIEW_ONLY = False
 
 
-def build_fname_base():
+def build_fname_base(*, parameters=None, save_dir=None):
     """Reserve one short output stem shared by the workbook and its plots."""
+    parameters = params if parameters is None else parameters
+    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+
     name = measurement_name(
-        "PUND", params["Vp"], "tr" + time_tag(params["rise_time"]),
-        "td" + time_tag(params["delay_time"]),
-        "tw" + time_tag(params["dwell_time"]),
+        "PUND", parameters["Vp"], "tr" + time_tag(parameters["rise_time"]),
+        "td" + time_tag(parameters["delay_time"]),
+        "tw" + time_tag(parameters["dwell_time"]),
     )
-    return reserve_output_stem(SAVE_DIR, name)
+    return reserve_output_stem(save_dir, name)
 
 
-def make_pund_seq_configs():
+def make_pund_seq_configs(*, channels=None, parameters=None):
     """Build PUND seq_configs directly in this script."""
-    rise_time = params["rise_time"]
-    dwell_time = params["dwell_time"]
-    delay_time = params["delay_time"]
-    vp = params["Vp"]
-    offset = params["offset"]
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    rise_time = parameters["rise_time"]
+    dwell_time = parameters["dwell_time"]
+    delay_time = parameters["delay_time"]
+    vp = parameters["Vp"]
+    offset = parameters["offset"]
 
     start_voltages = [
         0,
@@ -146,48 +155,84 @@ def make_pund_seq_configs():
 
     ch1_config = (1, start_voltages, stop_voltages, time_values, meas_types)
     ch2_config = (1, [0.0] * len(time_values), [0.0] * len(time_values), time_values, meas_types)
-    return {CH1: [ch1_config], CH2: [ch2_config]}
+    return {ch1: [ch1_config], ch2: [ch2_config]}
 
 
-def preview_waveform(output_path=None):
+def preview_waveform(output_path=None, *, channels=None, parameters=None):
     """Preview the PUND waveform without connecting to the PMU."""
-    return preview_sequence_configs(make_pund_seq_configs()[CH1], output_path, title_prefix="PUND CH1")
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    return preview_sequence_configs(make_pund_seq_configs(channels=channels, parameters=parameters)[ch1], output_path, title_prefix="PUND CH1")
 
 
-def build_params_table():
+def build_params_table(*, channels=None, inst=None, parameters=None, segarb_options=None):
     """Return the PUND run parameters as a two-column table."""
-    rows = [{"name": name, "value": repr(value)} for name, value in params.items()]
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    inst = INST if inst is None else inst
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+
+    rows = [{"name": name, "value": repr(value)} for name, value in parameters.items()]
     rows.extend(
         {"name": name, "value": repr(value)}
-        for name, value in SEGARB_OPTIONS.items()
+        for name, value in segarb_options.items()
     )
+    rows.extend([
+        {"name": "inst", "value": inst},
+        {"name": "channels", "value": repr((ch1, ch2))},
+    ])
     rows.append({"name": "saved_at", "value": saved_at()})
     return pd.DataFrame(rows)
 
 
-def save_pund_workbook(output_path, df_ch1, df_ch2, data):
+def save_pund_workbook(
+    output_path,
+    df_ch1,
+    df_ch2,
+    data,
+    *,
+    channels=None,
+    inst=None,
+    parameters=None,
+    segarb_options=None,
+):
     """Save raw data, analysis data, and parameters into one Excel workbook."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    inst = INST if inst is None else inst
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         df_ch1.to_excel(writer, sheet_name="Channel_1", index=False)
         df_ch2.to_excel(writer, sheet_name="Channel_2", index=False)
         data["df_total"].to_excel(writer, sheet_name="Total", index=False)
         data["pund_diff"].to_excel(writer, sheet_name="PUND_Diff", index=False)
-        build_params_table().to_excel(writer, sheet_name="Parameters", index=False)
+        build_params_table(channels=channels, inst=inst, parameters=parameters, segarb_options=segarb_options).to_excel(writer, sheet_name="Parameters", index=False)
+    return Path(output_path)
 
 
-def acquire_with_auto_range(query):
+def acquire_with_auto_range(query, *, channels=None, parameters=None, segarb_options=None):
     """Acquire PUND data using the shared automatic fixed-range helper."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+
     def acquire_once(ranges):
-        current_ranges = {CH1: ranges["Irange1"], CH2: ranges["Irange2"]}
+        current_ranges = {ch1: ranges["Irange1"], ch2: ranges["Irange2"]}
         execute_segARB_test(
             query,
-            [CH1, CH2],
-            make_pund_seq_configs(),
+            [ch1, ch2],
+            make_pund_seq_configs(channels=channels, parameters=parameters),
             current_ranges=current_ranges,
-            options=SEGARB_OPTIONS,
+            options=segarb_options,
         )
-        df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
-        power_off_outputs(query, (CH1, CH2))
+        df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
+        power_off_outputs(query, (ch1, ch2))
         if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
             raise ValueError("PUND returned empty channel data during range check.")
         return df_ch1, df_ch2
@@ -195,35 +240,40 @@ def acquire_with_auto_range(query):
     result, final_ranges, _assessments = acquire_with_auto_current_range(
         acquire_once,
         {
-            "Irange1": params["Irange1"],
-            "Irange2": params["Irange2"],
+            "Irange1": parameters["Irange1"],
+            "Irange2": parameters["Irange2"],
         },
         {
-            "Irange1": lambda data: data[0][f"Current {CH1}"].to_numpy(),
-            "Irange2": lambda data: data[1][f"Current {CH2}"].to_numpy(),
+            "Irange1": lambda data: data[0][f"Current {ch1}"].to_numpy(),
+            "Irange2": lambda data: data[1][f"Current {ch2}"].to_numpy(),
         },
         labels={"Irange1": "I1", "Irange2": "I2"},
         test_name="PUND",
     )
-    params.update(final_ranges)
+    remember_current_ranges(params, final_ranges, __file__)
+    parameters.update(final_ranges)
     return result
 
 
-def analyze_pund_edge_diff(df_ch1, df_ch2):
+def analyze_pund_edge_diff(df_ch1, df_ch2, *, channels=None, parameters=None):
     """Analyze PUND data for arbitrary measured segment selections."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
         raise ValueError("PUND returned empty channel data.")
 
-    ch1_config = make_pund_seq_configs()[CH1][0]
+    ch1_config = make_pund_seq_configs(channels=channels, parameters=parameters)[ch1][0]
     time_values = ch1_config[3]
     meas_types = ch1_config[4]
     meas_start = ch1_config[5] if len(ch1_config) > 5 else [0.0] * len(time_values)
     meas_stop = ch1_config[6] if len(ch1_config) > 6 else list(time_values)
 
-    v_total = df_ch1[f"Voltage {CH1}"].values - df_ch2[f"Voltage {CH2}"].values
-    i1_total = df_ch1[f"Current {CH1}"].values
-    i_total = -df_ch2[f"Current {CH2}"].values
-    t_total = df_ch1[f"Timestamp {CH1}"].values
+    v_total = df_ch1[f"Voltage {ch1}"].values - df_ch2[f"Voltage {ch2}"].values
+    i1_total = df_ch1[f"Current {ch1}"].values
+    i_total = -df_ch2[f"Current {ch2}"].values
+    t_total = df_ch1[f"Timestamp {ch1}"].values
     df_total = pd.DataFrame(
         {
             "Time": t_total,
@@ -296,8 +346,8 @@ def analyze_pund_edge_diff(df_ch1, df_ch2):
         diff_current_i1 = pulses[first]["current_i1"][:min_len] - pulses[second]["current_i1"][:min_len]
         voltage = pulses[first]["voltage"][:min_len]
         local_time = np.arange(min_len) * sample_dt
-        polarization = calculate_polarization(diff_current, local_time, params.get("area_cm2", 1.0))
-        polarization_i1 = calculate_polarization(diff_current_i1, local_time, params.get("area_cm2", 1.0))
+        polarization = calculate_polarization(diff_current, local_time, parameters.get("area_cm2", 1.0))
+        polarization_i1 = calculate_polarization(diff_current_i1, local_time, parameters.get("area_cm2", 1.0))
         frames.append(
             pd.DataFrame(
                 {
@@ -327,16 +377,35 @@ def analyze_pund_edge_diff(df_ch1, df_ch2):
     }
 
 
-def main():
+def run_test(
+    params_override=None,
+    *,
+    channels=None,
+    inst=None,
+    preview_only=None,
+    save_dir=None,
+    segarb_options=None,
+):
     """Run the PUND measurement and save raw/analysis files."""
-    with PMUSession(INST, channels=(CH1, CH2)) as session:
+    parameters = merge_parameters(params, params_override)
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    inst = INST if inst is None else inst
+    preview_only = PREVIEW_ONLY if preview_only is None else preview_only
+    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+
+    if preview_only:
+        return {"preview": preview_waveform(channels=channels, parameters=parameters), "output_path": None, "params": dict(parameters), "accepted_current_ranges": {}}
+
+    with PMUSession(inst, channels=(ch1, ch2)) as session:
         Q = session.query
         print("Running PUND...")
-        df_ch1, df_ch2 = acquire_with_auto_range(Q)
-        fname_base = build_fname_base()
+        df_ch1, df_ch2 = acquire_with_auto_range(Q, channels=channels, parameters=parameters, segarb_options=segarb_options)
+        fname_base = build_fname_base(parameters=parameters, save_dir=save_dir)
 
-        data = analyze_pund_edge_diff(df_ch1, df_ch2)
-        save_pund_workbook(f"{fname_base}.xlsx", df_ch1, df_ch2, data)
+        data = analyze_pund_edge_diff(df_ch1, df_ch2, channels=channels, parameters=parameters)
+        workbook_path = save_pund_workbook(f"{fname_base}.xlsx", df_ch1, df_ch2, data, channels=channels, inst=inst, parameters=parameters, segarb_options=segarb_options)
 
         fig_i2, ax_i2 = plt.subplots(figsize=(7, 5))
         for seg in ["P-U", "N-D"]:
@@ -378,10 +447,11 @@ def main():
         fig_iv.savefig(f"{fname_base}_diff_iv.png", dpi=300)
         plt.close(fig_iv)
         print("PUND complete.")
+    result = {"output_path": workbook_path}
+    result.update(params=dict(parameters), accepted_current_ranges={key: parameters[key] for key in ("Irange1", "Irange2")})
+    result["settings"] = {"inst": inst, "channels": channels, "segarb_options": segarb_options}
+    return result
 
 
 if __name__ == "__main__":
-    if PREVIEW_ONLY:
-        preview_waveform()
-    else:
-        main()
+    run_test()

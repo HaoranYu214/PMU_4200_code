@@ -22,6 +22,7 @@ from keithley4200.output import measurement_name, reserve_output_stem, voltage_t
 from keithley4200.pmu.data_processing import calculate_polarization, read_both_channels
 from keithley4200.pmu.pmu_tests import execute_segARB_test, power_off_outputs
 from keithley4200.pmu.session import PMUSession
+from keithley4200.pmu.timing import nls_padding_time
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
@@ -32,6 +33,7 @@ params = dict(
     Delaytime=100e-6,
     Vsquare=1.5,
     Rt_s=1e-7,
+    TotalDelay=0.11,
     Dwell=1e-4,
     Irange1=1e-4,
     Irange2=1e-4,
@@ -111,6 +113,13 @@ def make_nls_seq_configs():
     measure_square_type = 2 if measure_square else 0
     meas_types = [0, 0, 0, 0, 0, measure_square_type, measure_square_type, measure_square_type, 0, 2, 2, 0, 2, 2]
 
+    padding = nls_padding_time(params)
+    if padding:
+        start_voltages.insert(9, offset)
+        stop_voltages.insert(9, offset)
+        time_values.insert(9, padding)
+        meas_types.insert(9, 0)
+
     ch1_config = (1, start_voltages, stop_voltages, time_values, meas_types)
     ch2_config = (1, [0.0] * len(time_values), [0.0] * len(time_values), time_values, meas_types)
     return {CH1: [ch1_config], CH2: [ch2_config]}
@@ -128,6 +137,7 @@ def build_params_table():
         {"name": name, "value": repr(value)}
         for name, value in SEGARB_OPTIONS.items()
     )
+    rows.append({"name": "PaddingDelay", "value": repr(nls_padding_time(params))})
     rows.append({"name": "saved_at", "value": saved_at()})
     return pd.DataFrame(rows)
 
@@ -228,13 +238,13 @@ def save_nls_results(df_ch1, df_ch2):
 
 def main():
     """Run the NLS switch measurement."""
+    seq_configs = make_nls_seq_configs()
     with PMUSession(INST, channels=(CH1, CH2)) as session:
         query = session.query
         print(
             "Running NLS switch "
             f"(Vp={params['Vp']}V, Vsquare={params['Vsquare']:.2f}V, Dwell={params['Dwell']:.1e}s)..."
         )
-        seq_configs = make_nls_seq_configs()
         current_ranges = {CH1: params["Irange1"], CH2: params["Irange2"]}
         execute_segARB_test(
             query,

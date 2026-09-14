@@ -33,11 +33,11 @@ class WaveformOwnershipTests(unittest.TestCase):
     def test_fet_entries_own_their_pulse_protocols(self):
         self.assertIn(
             "run_dual_channel_pulse_train",
-            top_level_functions("measurements/pmu/fet/pulse_train.py"),
+            top_level_functions("measurements/pmu/pulse/pulse_train.py"),
         )
         self.assertIn(
             "run_dual_channel_sweep_train",
-            top_level_functions("measurements/pmu/fet/pulse_sweep.py"),
+            top_level_functions("measurements/pmu/pulse/pulse_sweep.py"),
         )
 
     def test_segment_arb_waveforms_are_owned_by_experiment_entries(self):

@@ -1,4 +1,19 @@
-# 厂商资料
+# Vendor reference material
+
+[English](#english) | [中文](#中文)
+
+## English
+
+- [manuals](manuals/README.md): the KXCI programming manual and the repository's common parameter reference, covering SMU and PMU.
+- [official_examples](official_examples/README.md): vendor code samples for comparing command formats.
+
+Run maintained experiments from [measurements](../measurements/README.md). Vendor examples may execute on import and are not shared-library dependencies. Device safety settings differ from instrument command limits; see the [parameter and mode reference](manuals/PARAMETER_LIMITS.md).
+
+Parameter source: [manual limits and mode reference (Chinese)](manuals/PARAMETER_LIMITS.md).
+
+## 中文
+
+### 厂商资料
 
 - [manuals](manuals/README.md)：KXCI 编程手册和本库常用参数速查，覆盖 SMU 与 PMU。
 - [official_examples](official_examples/README.md)：官方示例代码，用于对照命令格式。

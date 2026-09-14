@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Run independent dual-polarity FeFET tests over a retention-delay sweep.
 
-Each delay invokes bipolar_program_read.main() as a fresh PMU session.
+Each delay invokes bipolar_program_read.run_test() as a fresh PMU session.
 The dual test remains responsible for the exact positive/negative write and
 read parameters; configure those in bipolar_program_read.py.
 """
@@ -59,8 +59,8 @@ def save_summary(summary, output_dir):
     axis.set_ylabel("Ids, PMU CH2 (A)")
     axis.set_title(
         "FeFET dual-polarity retention\n"
-        f"Vg_read = {dual.PARAMS['read_gate_voltage']:g} V, "
-        f"Vd_read = {dual.PARAMS['read_drain_voltage']:g} V"
+        f"Vg_read = {dual.params['read_gate_voltage']:g} V, "
+        f"Vd_read = {dual.params['read_drain_voltage']:g} V"
     )
     axis.grid(True, which="both", alpha=0.3)
     axis.legend(title="Write polarity")
@@ -79,36 +79,26 @@ def main():
         raise ValueError("Set PREVIEW_ONLY = False in bipolar_program_read.py.")
 
     output_dir = prepare_output_dir(Path(dual.SAVE_DIR) / SWEEP_NAME)
-    original_save_dir = dual.SAVE_DIR
-    original_delay = dual.PARAMS["read_delay"]
-    original_output_tag = dual.OUTPUT_TAG
     rows = []
 
     print(
         "Important: the first positive point uses the device state present before "
         "the script starts. Later positive points follow the preceding negative state."
     )
-    try:
-        dual.SAVE_DIR = output_dir
-        for index, delay in enumerate(DELAY_TIMES, start=1):
-            delay = float(delay)
-            dual.READ_DELAY = delay
-            dual.PARAMS["read_delay"] = delay
-            dual.OUTPUT_TAG = None  # The standard filename already includes td.
-            print(f"\n=== Delay {delay:g} s ({index}/{len(DELAY_TIMES)}) ===")
-            result_path = dual.main()
-            if result_path is None:
-                raise RuntimeError(f"Delay {delay:g} s did not return a result file.")
-            frame = pd.read_excel(result_path, sheet_name="FET_Data")
-            frame.insert(0, "RequestedDelay_s", delay)
-            frame.insert(1, "DelayRunIndex", index)
-            frame["SourceWorkbook"] = Path(result_path).name
-            rows.append(frame)
-    finally:
-        dual.SAVE_DIR = original_save_dir
-        dual.READ_DELAY = original_delay
-        dual.PARAMS["read_delay"] = original_delay
-        dual.OUTPUT_TAG = original_output_tag
+    for index, delay in enumerate(DELAY_TIMES, start=1):
+        delay = float(delay)
+        print(f"\n=== Delay {delay:g} s ({index}/{len(DELAY_TIMES)}) ===")
+        result_path = dual.run_test(
+            params_override={"read_delay": delay}, save_dir=output_dir,
+            output_tag=None, preview_only=False,
+        )["output_path"]
+        if result_path is None:
+            raise RuntimeError(f"Delay {delay:g} s did not return a result file.")
+        frame = pd.read_excel(result_path, sheet_name="FET_Data")
+        frame.insert(0, "RequestedDelay_s", delay)
+        frame.insert(1, "DelayRunIndex", index)
+        frame["SourceWorkbook"] = Path(result_path).name
+        rows.append(frame)
 
     summary = pd.concat(rows, ignore_index=True)
     return save_summary(summary, output_dir)

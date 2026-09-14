@@ -29,6 +29,8 @@ for path in (SRC_ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from keithley4200.parameter_defaults import remember_current_ranges
+
 
 from keithley4200.output import reserve_summary_stem
 
@@ -227,14 +229,6 @@ def configure_map(module):
     module.PV2_BASE_PARAMS = dict(PV2_PARAMS)
     module.PUND_BASE_PARAMS = dict(PUND_PARAMS)
 
-    for child, base_params in (
-        (module.PV2, module.PV2_BASE_PARAMS),
-        (module.PUND_tri, module.PUND_BASE_PARAMS),
-    ):
-        child.INST = INST
-        child.CH1, child.CH2 = CH1, CH2
-        _replace_dict(child.params, base_params)
-        _replace_dict(child.SEGARB_OPTIONS, COMMON_SEGARB_OPTIONS)
 
 
 def iv_turning_points(vmax_v):
@@ -320,7 +314,7 @@ def run_pv_and_pund_stage(module, stage_name):
     save_root = SAVE_DIRS[stage_name]
     for run_index in range(1, int(PV_AND_PUND_REPEAT_COUNT) + 1):
         print(f"PV and PUND repeat {run_index}/{PV_AND_PUND_REPEAT_COUNT}")
-        module.run_pv_and_pund(
+        results = module.run_pv_and_pund(
             inst=INST,
             channels=(CH1, CH2),
             pv2_params=dict(PV2_PARAMS),
@@ -333,11 +327,23 @@ def run_pv_and_pund_stage(module, stage_name):
             settle_time_s=float(PV_AND_PUND_SETTLE_TIME_S),
             stop_on_error=STOP_ON_ERROR,
         )
+        for name, defaults in (("PV2", PV2_PARAMS), ("PUND_tri", PUND_PARAMS)):
+            result = (results or {}).get(name)
+            if result is not None:
+                remember_current_ranges(
+                    defaults, result.get("accepted_current_ranges", {}), __file__,
+                    "PV2_PARAMS" if name == "PV2" else "PUND_PARAMS",
+                )
 
 
 def run_map_stage(module):
     configure_map(module)
     result = module.run_map()
+    if "accepted_current_ranges" in result.columns:
+        for _, row in result.iterrows():
+            name = "PV2_PARAMS" if row["test"] == "PV2" else "PUND_PARAMS"
+            defaults = PV2_PARAMS if row["test"] == "PV2" else PUND_PARAMS
+            remember_current_ranges(defaults, row["accepted_current_ranges"], __file__, name)
     expected_runs = (
         len(PV2_PUND_MAP["vp_values"])
         * len(PV2_PUND_MAP["frequency_values_hz"])
@@ -514,17 +520,13 @@ def preview_package():
             ):
                 if not enabled:
                     continue
-                modules["map"].configure_test(
-                    child,
-                    base_params=base_params,
-                    vp=vp,
-                    frequency_hz=frequency,
-                    delay_time_s=delay,
-                    save_dir=modules["map"].SAVE_DIRS[test_name],
+                point_params = modules["map"].make_parameters(
+                    base_params, vp, frequency, delay,
                 )
                 display_name = "PV2" if test_name == "PV2" else "Triangular PUND"
                 results.append(
                     child.preview_waveform(
+                        parameters=point_params, channels=(CH1, CH2),
                         show=False,
                         title_prefix=(
                             f"PV2/PUND Map | {map_position} | {display_name} | "

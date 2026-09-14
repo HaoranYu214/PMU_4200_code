@@ -22,6 +22,7 @@ from keithley4200.output import measurement_name, reserve_output_stem, voltage_t
 from keithley4200.pmu.data_processing import calculate_polarization, read_both_channels
 from keithley4200.pmu.pmu_tests import execute_segARB_test, power_off_outputs
 from keithley4200.pmu.session import PMUSession
+from keithley4200.pmu.timing import nls_padding_time
 
 
 SEGARB_OPTIONS = {
@@ -43,6 +44,7 @@ PARAMS = dict(
     Rt_p=2.5e-4,
     Delaytime=5e-4,
     Rt_s=1e-7,
+    TotalDelay=0.11,
     Dwell=1e-6,
     Irange1=1e-4,
     Irange2=1e-4,
@@ -56,7 +58,7 @@ PREVIEW_ONLY = True
 
 
 def make_nls_seq_configs(ch1, ch2, params):
-    """Build the exact 14-segment NLS sequence used for preview and execution."""
+    """Build the NLS sequence with a fixed preset-to-read interval."""
     measure_square = params.get("MeasureSquare", True)
     offset = params["offset"]
     vp = params["Vp"]
@@ -132,6 +134,13 @@ def make_nls_seq_configs(ch1, ch2, params):
         2,
     ]
 
+    padding = nls_padding_time(params)
+    if padding:
+        start_voltages.insert(9, offset)
+        stop_voltages.insert(9, offset)
+        time_values.insert(9, padding)
+        meas_types.insert(9, 0)
+
     ch1_config = (1, start_voltages, stop_voltages, time_values, meas_types)
     ch2_config = (
         1,
@@ -161,6 +170,7 @@ def build_params_table(params, segarb_options):
         {"name": name, "value": repr(value)}
         for name, value in segarb_options.items()
     )
+    rows.append({"name": "PaddingDelay", "value": repr(nls_padding_time(params))})
     rows.append({"name": "saved_at", "value": saved_at()})
     return pd.DataFrame(rows)
 
@@ -176,6 +186,7 @@ def run_nls_switch_test(
     segarb_options=None,
 ):
     """Run one NLS switch measurement and save raw and processed outputs."""
+    seq_configs = make_nls_seq_configs(ch1, ch2, params)
     if segarb_options is None:
         segarb_options = SEGARB_OPTIONS
     save_dir = Path(save_dir)
@@ -192,7 +203,6 @@ def run_nls_switch_test(
         "Running NLS switch "
         f"(Vp={params['Vp']}V, Vsquare={params['Vsquare']:.2f}V, Dwell={params['Dwell']:.1e}s)..."
     )
-    seq_configs = make_nls_seq_configs(ch1, ch2, params)
     current_ranges = {ch1: params["Irange1"], ch2: params["Irange2"]}
     execute_segARB_test(
         Q,
@@ -308,6 +318,7 @@ if __name__ == "__main__":
     if PREVIEW_ONLY:
         preview_nls_waveform(PARAMS, ch1=CH1, ch2=CH2)
     else:
+        make_nls_seq_configs(CH1, CH2, PARAMS)
         with PMUSession(INST, channels=(CH1, CH2)) as session:
             run_nls_switch_test(
                 session.query,

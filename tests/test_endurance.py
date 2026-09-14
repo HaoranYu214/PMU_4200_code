@@ -65,14 +65,10 @@ class SegmentArbMeasurementWindowTests(unittest.TestCase):
             [0, 2],
         )
 
-        self.assertIn(
-            ":PMU:SARB:SEQ:MEAS:START 1, 1, 0.00e+00, 0.00e+00",
-            commands,
-        )
-        self.assertIn(
-            ":PMU:SARB:SEQ:MEAS:STOP 1, 1, 0.00e+00, 2.00e-05",
-            commands,
-        )
+        for prefix, expected in ((":PMU:SARB:SEQ:MEAS:START", [0.0, 0.0]),
+                                 (":PMU:SARB:SEQ:MEAS:STOP", [0.0, 2e-5])):
+            command = next(c for c in commands if c.startswith(prefix + " "))
+            self.assertEqual([float(v) for v in command.split(",")[2:]], expected)
 
     def test_invalid_measured_window_is_rejected_before_commands_are_sent(self):
         commands = []
@@ -131,7 +127,7 @@ class EnduranceConfigurationTests(unittest.TestCase):
         ]
         self.assertEqual(len(measurement_stop_commands), 2)
         for command in measurement_stop_commands:
-            self.assertTrue(command.endswith("0.00e+00, 0.00e+00, 0.00e+00, 0.00e+00"))
+            self.assertEqual([float(v) for v in command.split(",")[2:]], [0.0] * 4)
 
     def test_pv2_analysis_splits_and_integrates_each_loop(self):
         loop_voltage = np.array([0.0, 1.0, 0.0, -1.0, 0.0])

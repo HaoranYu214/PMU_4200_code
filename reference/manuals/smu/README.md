@@ -1,4 +1,22 @@
-# KXCI 编程手册
+# KXCI programming manual
+
+[English](#english) | [中文](#中文)
+
+## English
+
+This directory contains [4200A-KXCI-907-01D_May_2024.pdf](4200A-KXCI-907-01D_May_2024.pdf), revision D, May 2024.
+
+- Chapter 2: communication setup.
+- Chapter 5: SMU System/User Mode, sweeps, ranges, and compliance.
+- Chapter 7: PGU/PMU, RPM, standard pulses, and Segment Arb.
+
+Code comments cite printed page numbers, which differ from the PDF reader's page index. This programming manual does not replace module specifications, the Pulse Card user manual, or device reliability data.
+
+Parameter source: [manual limits and mode reference (Chinese)](../PARAMETER_LIMITS.md).
+
+## 中文
+
+### KXCI 编程手册
 
 本目录保存 [4200A-KXCI-907-01D_May_2024.pdf](4200A-KXCI-907-01D_May_2024.pdf)，版本 Rev. D，May 2024。
 

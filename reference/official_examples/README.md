@@ -1,4 +1,19 @@
-# 官方示例归档
+# Vendor example archive
+
+[English](#english) | [中文](#中文)
+
+## English
+
+- [pmu](pmu/README.md): PMU examples.
+- [smu](smu/README.md): SMU System/User Mode examples.
+
+These files are for comparing command formats. Maintained experiment entries live in [measurements](../../measurements/README.md). Examples may communicate with the instrument on import and do not follow the maintained code's startup/save conventions. Original example code is retained; these documentation additions do not change its behavior.
+
+Parameter source: [manual limits and mode reference (Chinese)](../manuals/PARAMETER_LIMITS.md).
+
+## 中文
+
+### 官方示例归档
 
 - [pmu](pmu/README.md)：PMU 示例。
 - [smu](smu/README.md)：SMU System/User Mode 示例。

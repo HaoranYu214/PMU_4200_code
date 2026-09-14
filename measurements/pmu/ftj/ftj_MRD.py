@@ -54,6 +54,7 @@ from keithley4200.pmu.pmu_tests import (
     validate_segment_arb_configs,
 )
 from keithley4200.pmu.session import PMUSession
+from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
@@ -90,141 +91,7 @@ params = {
 }
 
 
-def _sync_parameter_aliases():
-    global BASE_V, REFERENCE_V, WRITE_VOLTAGES, READ_V, CYCLES_PER_LEVEL
-    global REFERENCE_RISE, REFERENCE_DWELL, REFERENCE_FALL, REFERENCE_IDLE_2
-    global WRITE_RISE, WRITE_DWELL, WRITE_FALL, WRITE_IDLE_2
-    global READ_RISE, READ_DWELL, READ_FALL, READ_IDLE_2
-
-    BASE_V = float(params["base_v"])
-    REFERENCE_V = float(params["reference_v"])
-    WRITE_VOLTAGES = list(params["write_voltages"])
-    READ_V = float(params["read_v"])
-    CYCLES_PER_LEVEL = int(params["cycles_per_level"])
-    REFERENCE_RISE = float(params["reference_rise"])
-    REFERENCE_DWELL = float(params["reference_dwell"])
-    REFERENCE_FALL = float(params["reference_fall"])
-    REFERENCE_IDLE_2 = float(params["reference_idle"])
-    WRITE_RISE = float(params["write_rise"])
-    WRITE_DWELL = float(params["write_dwell"])
-    WRITE_FALL = float(params["write_fall"])
-    WRITE_IDLE_2 = float(params["write_idle"])
-    READ_RISE = float(params["read_rise"])
-    READ_DWELL = float(params["read_dwell"])
-    READ_FALL = float(params["read_fall"])
-    READ_IDLE_2 = float(params["read_idle"])
-
-
-_sync_parameter_aliases()
-
-BASE_SEQ_ID = 1
-MAX_SEGMENTS_PER_SEQ = MAX_SEGMENTS_PER_SEQUENCE
-
-# PREVIEW_ONLY = True
 PREVIEW_ONLY = False
-
-time_values_reference = [
-    REFERENCE_RISE,
-    REFERENCE_DWELL,
-    REFERENCE_FALL,
-    REFERENCE_IDLE_2,
-]
-time_values_write = [
-    WRITE_RISE,
-    WRITE_DWELL,
-    WRITE_FALL,
-    WRITE_IDLE_2,
-]
-time_values_read = [
-    READ_RISE,
-    READ_DWELL,
-    READ_FALL,
-    READ_IDLE_2,
-]
-
-meas_types_reference = [0] * len(time_values_reference)
-meas_start_reference = [0.0] * len(time_values_reference)
-meas_stop_reference = [0.0] * len(time_values_reference)
-
-meas_types_write = [0] * len(time_values_write)
-meas_start_write = [0.0] * len(time_values_write)
-meas_stop_write = [0.0] * len(time_values_write)
-
-meas_types_read = [0, 1, 0, 0]
-meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-
-def build_pulse_block(amplitude, time_values):
-    """Return a 4-segment base -> absolute target -> base pulse block."""
-    start_v = [BASE_V, amplitude, amplitude, BASE_V]
-    stop_v = [amplitude, amplitude, BASE_V, BASE_V]
-    return start_v, stop_v, list(time_values)
-
-
-def build_mrd_sequence(seq_id, write_voltage):
-    """Build one MRD sequence: reference pulse, read, write pulse, then read."""
-    ch1_start_v = []
-    ch1_stop_v = []
-    ch2_start_v = []
-    ch2_stop_v = []
-    time_values = []
-    meas_types = []
-    meas_start = []
-    meas_stop = []
-
-    pulse_defs = [
-        (REFERENCE_V, time_values_reference, meas_types_reference, meas_start_reference, meas_stop_reference),
-        (READ_V, time_values_read, meas_types_read, meas_start_read, meas_stop_read),
-        (write_voltage, time_values_write, meas_types_write, meas_start_write, meas_stop_write),
-        (READ_V, time_values_read, meas_types_read, meas_start_read, meas_stop_read),
-    ]
-
-    for amplitude, pulse_times, pulse_meas_types, pulse_meas_start, pulse_meas_stop in pulse_defs:
-        start_v, stop_v, local_times = build_pulse_block(amplitude, pulse_times)
-        ch1_start_v.extend(start_v)
-        ch1_stop_v.extend(stop_v)
-        ch2_start_v.extend([0.0] * len(local_times))
-        ch2_stop_v.extend([0.0] * len(local_times))
-        time_values.extend(local_times)
-        meas_types.extend(pulse_meas_types)
-        meas_start.extend(pulse_meas_start)
-        meas_stop.extend(pulse_meas_stop)
-
-    if len(time_values) > MAX_SEGMENTS_PER_SEQ:
-        raise ValueError(
-            f"MRD sequence {seq_id} has {len(time_values)} segments, "
-            f"above MAX_SEGMENTS_PER_SEQ={MAX_SEGMENTS_PER_SEQ}."
-        )
-
-    ch1_config = (seq_id, ch1_start_v, ch1_stop_v, time_values, meas_types, meas_start, meas_stop)
-    ch2_config = (seq_id, ch2_start_v, ch2_stop_v, time_values, meas_types, meas_start, meas_stop)
-    return ch1_config, ch2_config
-
-
-def build_all_sequences(write_voltages):
-    """Build one sequence per write voltage."""
-    ch1_configs = []
-    ch2_configs = []
-    seq_plan = []
-    seq_metadata = []
-
-    for index, write_voltage in enumerate(write_voltages):
-        seq_id = BASE_SEQ_ID + index
-        ch1_config, ch2_config = build_mrd_sequence(seq_id, write_voltage)
-        ch1_configs.append(ch1_config)
-        ch2_configs.append(ch2_config)
-        seq_plan.append((seq_id, CYCLES_PER_LEVEL))
-        seq_metadata.append(
-            {
-                "seq_id": seq_id,
-                "write_voltage": write_voltage,
-                "cycles": CYCLES_PER_LEVEL,
-            }
-        )
-
-    return ch1_configs, ch2_configs, seq_plan, seq_metadata
-
 
 def expected_cycle_table(seq_metadata):
     """Return the expected read-point order from the sequence plan."""
@@ -249,87 +116,6 @@ def expected_cycle_table(seq_metadata):
             )
     return pd.DataFrame(rows)
 
-
-def _rebuild_runtime_config():
-    global time_values_reference, time_values_write, time_values_read
-    global meas_types_reference, meas_start_reference, meas_stop_reference
-    global meas_types_write, meas_start_write, meas_stop_write
-    global meas_types_read, meas_start_read, meas_stop_read
-    global ch1_configs, ch2_configs, SEQ_PLAN, SEQ_METADATA
-    global seq_configs, SEQ_LIST, CURRENT_RANGES
-
-    _sync_parameter_aliases()
-    time_values_reference = [
-        REFERENCE_RISE, REFERENCE_DWELL, REFERENCE_FALL, REFERENCE_IDLE_2
-    ]
-    time_values_write = [WRITE_RISE, WRITE_DWELL, WRITE_FALL, WRITE_IDLE_2]
-    time_values_read = [READ_RISE, READ_DWELL, READ_FALL, READ_IDLE_2]
-    meas_types_reference = [0] * 4
-    meas_start_reference = [0.0] * 4
-    meas_stop_reference = [0.0] * 4
-    meas_types_write = [0] * 4
-    meas_start_write = [0.0] * 4
-    meas_stop_write = [0.0] * 4
-    meas_types_read = [0, 1, 0, 0]
-    meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-    meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-    ch1_configs, ch2_configs, SEQ_PLAN, SEQ_METADATA = build_all_sequences(
-        WRITE_VOLTAGES
-    )
-    seq_configs = {CH1: ch1_configs, CH2: ch2_configs}
-    SEQ_LIST = {CH1: list(SEQ_PLAN), CH2: list(SEQ_PLAN)}
-    CURRENT_RANGES = {
-        CH1: float(CURRENT_RANGES.get(CH1, next(iter(CURRENT_RANGES.values())))),
-        CH2: float(CURRENT_RANGES.get(CH2, next(iter(CURRENT_RANGES.values())))),
-    }
-    validate_segment_arb_configs(seq_configs)
-
-
-_rebuild_runtime_config()
-
-
-def configure_measurement(
-    *,
-    params_override=None,
-    inst=None,
-    channels=None,
-    current_ranges=None,
-    segarb_options=None,
-    save_dir=None,
-    file_stem=None,
-):
-    """Apply one complete workflow configuration and rebuild all MRD sequences."""
-    global INST, CH1, CH2, SAVE_DIR, FILE_STEM, CURRENT_RANGES, SEGARB_OPTIONS
-
-    if params_override is not None:
-        params.clear()
-        params.update(params_override)
-    if inst is not None:
-        INST = inst
-    if channels is not None:
-        CH1, CH2 = tuple(channels)
-    if current_ranges is not None:
-        CURRENT_RANGES = dict(current_ranges)
-    if segarb_options is not None:
-        SEGARB_OPTIONS = dict(segarb_options)
-    if save_dir is not None:
-        SAVE_DIR = Path(save_dir)
-    if file_stem is not None:
-        FILE_STEM = str(file_stem)
-    _rebuild_runtime_config()
-
-
-def preview_waveform(output_path=None, *, show=True, title_prefix="FTJ MRD CH1"):
-    """Preview all MRD sequences on CH1."""
-    return preview_sequence_configs(
-        ch1_configs,
-        output_path,
-        title_prefix=title_prefix,
-        show=show,
-    )
-
-
 def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, add_gap=True):
     """Append t-V endpoint pairs for one waveform block."""
     cursor = start_time
@@ -341,88 +127,6 @@ def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, ad
     if add_gap:
         points.append((None, None))
     return cursor
-
-
-def build_waveform_trace_table():
-    """Return one wide t-V table for plotting reference, write, and read waveforms."""
-    reference_points = []
-    write_points = []
-    read_points = []
-    cursor = 0.0
-
-    for item in SEQ_METADATA:
-        for _cycle_index in range(item["cycles"]):
-            reference_start_v, reference_stop_v, reference_times = build_pulse_block(REFERENCE_V, time_values_reference)
-            cursor = _extend_trace_points(
-                reference_points,
-                reference_start_v,
-                reference_stop_v,
-                reference_times,
-                cursor,
-            )
-
-            read_start_v, read_stop_v, read_times = build_pulse_block(READ_V, time_values_read)
-            cursor = _extend_trace_points(
-                read_points,
-                read_start_v,
-                read_stop_v,
-                read_times,
-                cursor,
-            )
-
-            write_start_v, write_stop_v, write_times = build_pulse_block(item["write_voltage"], time_values_write)
-            cursor = _extend_trace_points(
-                write_points,
-                write_start_v,
-                write_stop_v,
-                write_times,
-                cursor,
-            )
-
-            read_start_v, read_stop_v, read_times = build_pulse_block(READ_V, time_values_read)
-            cursor = _extend_trace_points(
-                read_points,
-                read_start_v,
-                read_stop_v,
-                read_times,
-                cursor,
-            )
-
-    trace_columns = {
-        "Time_Reference_s": [time for time, _voltage in reference_points],
-        "Voltage_Reference_V": [voltage for _time, voltage in reference_points],
-        "Time_Write_s": [time for time, _voltage in write_points],
-        "Voltage_Write_V": [voltage for _time, voltage in write_points],
-        "Time_Read_s": [time for time, _voltage in read_points],
-        "Voltage_Read_V": [voltage for _time, voltage in read_points],
-    }
-    return pd.DataFrame({name: pd.Series(values) for name, values in trace_columns.items()})
-
-
-def build_readback_table(df_ch1, df_ch2):
-    """Return one row per measured read point."""
-    if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
-        raise ValueError("MRD run returned empty data.")
-
-    expected_df = expected_cycle_table(SEQ_METADATA)
-    expected_count = len(expected_df)
-    actual_counts = (len(df_ch1), len(df_ch2))
-    if actual_counts != (expected_count, expected_count):
-        raise ValueError(
-            "MRD readback count mismatch: "
-            f"expected {expected_count}, got CH{CH1}={actual_counts[0]} "
-            f"and CH{CH2}={actual_counts[1]}."
-        )
-    count = expected_count
-
-    expected_df = expected_df.iloc[:count].reset_index(drop=True)
-    result_df = expected_df.copy()
-    result_df["ReadTimestamp"] = df_ch1[f"Timestamp {CH1}"].values[:count]
-    result_df["ReadVoltage"] = df_ch1[f"Voltage {CH1}"].values[:count]
-    result_df["ReadCurrent"] = df_ch1[f"Current {CH1}"].values[:count]
-    result_df["Resistance"] = result_df["ReadVoltage"] / result_df["ReadCurrent"].replace(0, pd.NA)
-    return result_df
-
 
 def build_distribution_summary(result_df):
     """Summarize resistance distribution for each write level."""
@@ -444,42 +148,368 @@ def build_distribution_summary(result_df):
     return summary_df
 
 
-def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
+def build_waveform(*, parameters=None, channels=None):
+    """Build pulse arrays and execution metadata from this run's parameters."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    base_v = float(parameters["base_v"])
+    reference_v = float(parameters["reference_v"])
+    write_voltages = list(parameters["write_voltages"])
+    read_v = float(parameters["read_v"])
+    cycles_per_level = int(parameters["cycles_per_level"])
+    reference_rise = float(parameters["reference_rise"])
+    reference_dwell = float(parameters["reference_dwell"])
+    reference_fall = float(parameters["reference_fall"])
+    reference_idle_2 = float(parameters["reference_idle"])
+    write_rise = float(parameters["write_rise"])
+    write_dwell = float(parameters["write_dwell"])
+    write_fall = float(parameters["write_fall"])
+    write_idle_2 = float(parameters["write_idle"])
+    read_rise = float(parameters["read_rise"])
+    read_dwell = float(parameters["read_dwell"])
+    read_fall = float(parameters["read_fall"])
+    read_idle_2 = float(parameters["read_idle"])
+    time_values_reference = [
+        reference_rise, reference_dwell, reference_fall, reference_idle_2
+    ]
+    time_values_write = [write_rise, write_dwell, write_fall, write_idle_2]
+    time_values_read = [read_rise, read_dwell, read_fall, read_idle_2]
+    meas_types_reference = [0] * 4
+    meas_start_reference = [0.0] * 4
+    meas_stop_reference = [0.0] * 4
+    meas_types_write = [0] * 4
+    meas_start_write = [0.0] * 4
+    meas_stop_write = [0.0] * 4
+    meas_types_read = [0, 1, 0, 0]
+    meas_start_read = [0.0, read_dwell * 0.5, 0.0, 0.0]
+    meas_stop_read = [0.0, read_dwell * 0.9, 0.0, 0.0]
+    base_seq_id = 1
+    max_segments_per_seq = MAX_SEGMENTS_PER_SEQUENCE
+    ch1_configs, ch2_configs, seq_plan, seq_metadata = build_all_sequences(
+        write_voltages,
+        base_seq_id=base_seq_id,
+        base_v=base_v,
+        cycles_per_level=cycles_per_level,
+        max_segments_per_seq=max_segments_per_seq,
+        meas_start_read=meas_start_read,
+        meas_start_reference=meas_start_reference,
+        meas_start_write=meas_start_write,
+        meas_stop_read=meas_stop_read,
+        meas_stop_reference=meas_stop_reference,
+        meas_stop_write=meas_stop_write,
+        meas_types_read=meas_types_read,
+        meas_types_reference=meas_types_reference,
+        meas_types_write=meas_types_write,
+        read_v=read_v,
+        reference_v=reference_v,
+        time_values_read=time_values_read,
+        time_values_reference=time_values_reference,
+        time_values_write=time_values_write,
+    )
+    seq_configs = {ch1: ch1_configs, ch2: ch2_configs}
+    seq_list = {ch1: list(seq_plan), ch2: list(seq_plan)}
+    validate_segment_arb_configs(seq_configs)
+    return {
+        'base_v': base_v,
+        'read_v': read_v,
+        'reference_v': reference_v,
+        'seq_list': seq_list,
+        'seq_metadata': seq_metadata,
+        'ch1_configs': ch1_configs,
+        'seq_configs': seq_configs,
+        'time_values_read': time_values_read,
+        'time_values_reference': time_values_reference,
+        'time_values_write': time_values_write,
+    }
+
+
+def build_pulse_block(amplitude, time_values, *, base_v):
+    """Return a 4-segment base -> absolute target -> base pulse block."""
+    start_v = [base_v, amplitude, amplitude, base_v]
+    stop_v = [amplitude, amplitude, base_v, base_v]
+    return start_v, stop_v, list(time_values)
+
+
+def build_mrd_sequence(
+    seq_id,
+    write_voltage,
+    *,
+    base_v,
+    max_segments_per_seq,
+    meas_start_read,
+    meas_start_reference,
+    meas_start_write,
+    meas_stop_read,
+    meas_stop_reference,
+    meas_stop_write,
+    meas_types_read,
+    meas_types_reference,
+    meas_types_write,
+    read_v,
+    reference_v,
+    time_values_read,
+    time_values_reference,
+    time_values_write,
+):
+    """Build one MRD sequence: reference pulse, read, write pulse, then read."""
+    ch1_start_v = []
+    ch1_stop_v = []
+    ch2_start_v = []
+    ch2_stop_v = []
+    time_values = []
+    meas_types = []
+    meas_start = []
+    meas_stop = []
+
+    pulse_defs = [
+        (reference_v, time_values_reference, meas_types_reference, meas_start_reference, meas_stop_reference),
+        (read_v, time_values_read, meas_types_read, meas_start_read, meas_stop_read),
+        (write_voltage, time_values_write, meas_types_write, meas_start_write, meas_stop_write),
+        (read_v, time_values_read, meas_types_read, meas_start_read, meas_stop_read),
+    ]
+
+    for amplitude, pulse_times, pulse_meas_types, pulse_meas_start, pulse_meas_stop in pulse_defs:
+        start_v, stop_v, local_times = build_pulse_block(amplitude, pulse_times, base_v=base_v)
+        ch1_start_v.extend(start_v)
+        ch1_stop_v.extend(stop_v)
+        ch2_start_v.extend([0.0] * len(local_times))
+        ch2_stop_v.extend([0.0] * len(local_times))
+        time_values.extend(local_times)
+        meas_types.extend(pulse_meas_types)
+        meas_start.extend(pulse_meas_start)
+        meas_stop.extend(pulse_meas_stop)
+
+    if len(time_values) > max_segments_per_seq:
+        raise ValueError(
+            f"MRD sequence {seq_id} has {len(time_values)} segments, "
+            f"above MAX_SEGMENTS_PER_SEQ={max_segments_per_seq}."
+        )
+
+    ch1_config = (seq_id, ch1_start_v, ch1_stop_v, time_values, meas_types, meas_start, meas_stop)
+    ch2_config = (seq_id, ch2_start_v, ch2_stop_v, time_values, meas_types, meas_start, meas_stop)
+    return ch1_config, ch2_config
+
+
+def build_all_sequences(
+    write_voltages,
+    *,
+    base_seq_id,
+    base_v,
+    cycles_per_level,
+    max_segments_per_seq,
+    meas_start_read,
+    meas_start_reference,
+    meas_start_write,
+    meas_stop_read,
+    meas_stop_reference,
+    meas_stop_write,
+    meas_types_read,
+    meas_types_reference,
+    meas_types_write,
+    read_v,
+    reference_v,
+    time_values_read,
+    time_values_reference,
+    time_values_write,
+):
+    """Build one sequence per write voltage."""
+    ch1_configs = []
+    ch2_configs = []
+    seq_plan = []
+    seq_metadata = []
+
+    for index, write_voltage in enumerate(write_voltages):
+        seq_id = base_seq_id + index
+        ch1_config, ch2_config = build_mrd_sequence(seq_id, write_voltage, base_v=base_v, max_segments_per_seq=max_segments_per_seq, meas_start_read=meas_start_read, meas_start_reference=meas_start_reference, meas_start_write=meas_start_write, meas_stop_read=meas_stop_read, meas_stop_reference=meas_stop_reference, meas_stop_write=meas_stop_write, meas_types_read=meas_types_read, meas_types_reference=meas_types_reference, meas_types_write=meas_types_write, read_v=read_v, reference_v=reference_v, time_values_read=time_values_read, time_values_reference=time_values_reference, time_values_write=time_values_write)
+        ch1_configs.append(ch1_config)
+        ch2_configs.append(ch2_config)
+        seq_plan.append((seq_id, cycles_per_level))
+        seq_metadata.append(
+            {
+                "seq_id": seq_id,
+                "write_voltage": write_voltage,
+                "cycles": cycles_per_level,
+            }
+        )
+
+    return ch1_configs, ch2_configs, seq_plan, seq_metadata
+
+
+def preview_waveform(
+    output_path=None,
+    *,
+    show=True,
+    title_prefix='FTJ MRD CH1',
+    channels=None,
+    parameters=None,
+    waveform=None,
+):
+    """Preview all MRD sequences on CH1."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
+    return preview_sequence_configs(
+        waveform['ch1_configs'],
+        output_path,
+        title_prefix=title_prefix,
+        show=show,
+    )
+
+
+def build_waveform_trace_table(*, channels=None, parameters=None, waveform=None):
+    """Return one wide t-V table for plotting reference, write, and read waveforms."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
+    reference_points = []
+    write_points = []
+    read_points = []
+    cursor = 0.0
+
+    for item in waveform['seq_metadata']:
+        for _cycle_index in range(item["cycles"]):
+            reference_start_v, reference_stop_v, reference_times = build_pulse_block(waveform['reference_v'], waveform['time_values_reference'], base_v=waveform['base_v'])
+            cursor = _extend_trace_points(
+                reference_points,
+                reference_start_v,
+                reference_stop_v,
+                reference_times,
+                cursor,
+            )
+
+            read_start_v, read_stop_v, read_times = build_pulse_block(waveform['read_v'], waveform['time_values_read'], base_v=waveform['base_v'])
+            cursor = _extend_trace_points(
+                read_points,
+                read_start_v,
+                read_stop_v,
+                read_times,
+                cursor,
+            )
+
+            write_start_v, write_stop_v, write_times = build_pulse_block(item["write_voltage"], waveform['time_values_write'], base_v=waveform['base_v'])
+            cursor = _extend_trace_points(
+                write_points,
+                write_start_v,
+                write_stop_v,
+                write_times,
+                cursor,
+            )
+
+            read_start_v, read_stop_v, read_times = build_pulse_block(waveform['read_v'], waveform['time_values_read'], base_v=waveform['base_v'])
+            cursor = _extend_trace_points(
+                read_points,
+                read_start_v,
+                read_stop_v,
+                read_times,
+                cursor,
+            )
+
+    trace_columns = {
+        "Time_Reference_s": [time for time, _voltage in reference_points],
+        "Voltage_Reference_V": [voltage for _time, voltage in reference_points],
+        "Time_Write_s": [time for time, _voltage in write_points],
+        "Voltage_Write_V": [voltage for _time, voltage in write_points],
+        "Time_Read_s": [time for time, _voltage in read_points],
+        "Voltage_Read_V": [voltage for _time, voltage in read_points],
+    }
+    return pd.DataFrame({name: pd.Series(values) for name, values in trace_columns.items()})
+
+
+def build_readback_table(df_ch1, df_ch2, *, channels=None, parameters=None, waveform=None):
+    """Return one row per measured read point."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
+    if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
+        raise ValueError("MRD run returned empty data.")
+
+    expected_df = expected_cycle_table(waveform['seq_metadata'])
+    expected_count = len(expected_df)
+    actual_counts = (len(df_ch1), len(df_ch2))
+    if actual_counts != (expected_count, expected_count):
+        raise ValueError(
+            "MRD readback count mismatch: "
+            f"expected {expected_count}, got CH{ch1}={actual_counts[0]} "
+            f"and CH{ch2}={actual_counts[1]}."
+        )
+    count = expected_count
+
+    expected_df = expected_df.iloc[:count].reset_index(drop=True)
+    result_df = expected_df.copy()
+    result_df["ReadTimestamp"] = df_ch1[f"Timestamp {ch1}"].values[:count]
+    result_df["ReadVoltage"] = df_ch1[f"Voltage {ch1}"].values[:count]
+    result_df["ReadCurrent"] = df_ch1[f"Current {ch1}"].values[:count]
+    result_df["Resistance"] = result_df["ReadVoltage"] / result_df["ReadCurrent"].replace(0, pd.NA)
+    return result_df
+
+
+def run_test(
+    params_override=None,
+    *,
+    save_results=True,
+    save_dir=None,
+    file_stem=None,
+    channels=None,
+    current_ranges=None,
+    inst=None,
+    preview_only=None,
+    segarb_options=None,
+):
     """Run the FTJ MRD test and optionally save the readback table."""
-    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    parameters = merge_parameters(params, params_override)
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    current_ranges = dict(current_ranges) if current_ranges is not None else dict(zip(channels, (CURRENT_RANGES[CH1], CURRENT_RANGES[CH2])))
     file_stem = FILE_STEM if file_stem is None else str(file_stem)
-    with PMUSession(INST, channels=(CH1, CH2)) as session:
+    inst = INST if inst is None else inst
+    preview_only = PREVIEW_ONLY if preview_only is None else preview_only
+    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+    waveform = build_waveform(parameters=parameters, channels=channels)
+
+    if preview_only:
+        return {"preview": preview_waveform(channels=channels, parameters=parameters, waveform=waveform), "output_path": None, "params": dict(parameters), "accepted_current_ranges": {}}
+
+    with PMUSession(inst, channels=(ch1, ch2)) as session:
         query = session.query
         execute_segARB_test(
             query,
-            channels=[CH1, CH2],
-            seq_configs=seq_configs,
-            seq_list=SEQ_LIST,
-            current_ranges=CURRENT_RANGES,
-            options=SEGARB_OPTIONS,
+            channels=[ch1, ch2],
+            seq_configs=waveform['seq_configs'],
+            seq_list=waveform['seq_list'],
+            current_ranges=current_ranges,
+            options=segarb_options,
         )
 
-        df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
-        power_off_outputs(query, (CH1, CH2))
+        df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
+        power_off_outputs(query, (ch1, ch2))
 
-    result_df = build_readback_table(df_ch1, df_ch2)
+    result_df = build_readback_table(df_ch1, df_ch2, channels=channels, parameters=parameters, waveform=waveform)
     summary_df = build_distribution_summary(result_df)
-    waveform_df = build_waveform_trace_table()
+    waveform_df = build_waveform_trace_table(channels=channels, parameters=parameters, waveform=waveform)
 
     output_path = None
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, max(params["write_voltages"]), "tw" + time_tag(params["write_dwell"])),
+            save_dir, measurement_name(file_stem, max(parameters["write_voltages"]), "tw" + time_tag(parameters["write_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {
             "saved_at": saved_at(),
-            **params,
-            "inst": INST,
-            "channels": (CH1, CH2),
-            "current_ranges": CURRENT_RANGES,
-            "segarb_options": SEGARB_OPTIONS,
+            **parameters,
+            "inst": inst,
+            "channels": (ch1, ch2),
+            "current_ranges": current_ranges,
+            "segarb_options": segarb_options,
         }
         params_df = pd.DataFrame(
             {"name": saved_params.keys(), "value": map(repr, saved_params.values())}
@@ -493,7 +523,7 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
             waveform_df.to_excel(writer, sheet_name="Waveform", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
 
-    return {
+    result = {
         "df_ch1": df_ch1,
         "df_ch2": df_ch2,
         "result_df": result_df,
@@ -501,15 +531,10 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
         "waveform_df": waveform_df,
         "output_path": output_path,
     }
-
-
-def main():
-    """Run the FTJ MRD sequence and save readback data."""
-    if PREVIEW_ONLY:
-        preview_waveform()
-        return
-    run_ftj_test()
+    result.update(params=dict(parameters), accepted_current_ranges={})
+    result["settings"] = {"inst": inst, "channels": channels, "segarb_options": segarb_options}
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    run_test()

@@ -24,6 +24,7 @@ from keithley4200.pmu.pmu_tests import (
     validate_segment_arb_configs,
 )
 from keithley4200.pmu.session import PMUSession
+from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
 from keithley4200.tools.waveform_preview import preview_sequence_configs
 
 
@@ -69,9 +70,102 @@ READ_SEQ_ID = 2
 WRITE_NEGATIVE_SEQ_ID = 3
 
 
-def _pulse_config(seq_id, voltage, time_values, meas_types, meas_start, meas_stop):
-    ch1_start = [BASE_V, voltage, voltage, BASE_V]
-    ch1_stop = [voltage, voltage, BASE_V, BASE_V]
+def build_waveform(*, parameters=None, channels=None):
+    """Build pulse arrays and execution metadata from this run's parameters."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    base_v = float(parameters["base_v"])
+    write_positive_v = float(parameters["write_positive_v"])
+    write_negative_v = float(parameters["write_negative_v"])
+    read_v = float(parameters["read_v"])
+    write_positive_dwell = float(parameters["write_positive_dwell"])
+    write_negative_dwell = float(parameters["write_negative_dwell"])
+    read_dwell = float(parameters["read_dwell"])
+    write_positive_trf = float(parameters["write_positive_trf"])
+    write_negative_trf = float(parameters["write_negative_trf"])
+    read_trf = float(parameters["read_trf"])
+    write_positive_idle = float(parameters["write_positive_idle"])
+    write_negative_idle = float(parameters["write_negative_idle"])
+    read_idle = float(parameters["read_idle"])
+    wait_after_write_positive_s = float(parameters["wait_after_positive_write_s"])
+    wait_after_read_s = float(parameters["wait_after_read_s"])
+    wait_after_write_negative_s = float(parameters["wait_after_negative_write_s"])
+    positive_repeat_count = int(parameters["positive_repeat_count"])
+    negative_repeat_count = int(parameters["negative_repeat_count"])
+    plan_repeat_count = int(parameters["plan_repeat_count"])
+    if min(positive_repeat_count, negative_repeat_count, plan_repeat_count) < 0:
+        raise ValueError("Identical V2 repeat counts cannot be negative.")
+    time_values_write_positive = [
+        write_positive_trf, write_positive_dwell,
+        write_positive_trf, write_positive_idle,
+    ]
+    time_values_write_negative = [
+        write_negative_trf, write_negative_dwell,
+        write_negative_trf, write_negative_idle,
+    ]
+    time_values_read = [read_trf, read_dwell, read_trf, read_idle]
+    no_measure = [0, 0, 0, 0]
+    zero_windows = [0.0] * 4
+    read_types = [0, 1, 0, 0]
+    read_start = [0.0, read_dwell * 0.5, 0.0, 0.0]
+    read_stop = [0.0, read_dwell * 0.9, 0.0, 0.0]
+    ch1_write_positive_config, ch2_write_positive_config = _pulse_config(
+        WRITE_POSITIVE_SEQ_ID, write_positive_v, time_values_write_positive,
+        no_measure, zero_windows, zero_windows,
+        base_v=base_v,
+    )
+    ch1_read_config, ch2_read_config = _pulse_config(
+        READ_SEQ_ID, read_v, time_values_read, read_types, read_start, read_stop,
+        base_v=base_v,
+    )
+    ch1_write_negative_config, ch2_write_negative_config = _pulse_config(
+        WRITE_NEGATIVE_SEQ_ID, write_negative_v, time_values_write_negative,
+        no_measure, zero_windows, zero_windows,
+        base_v=base_v,
+    )
+    write_positive_entry = {
+        "name": "write_positive",
+        "seq_configs": {
+            ch1: [ch1_write_positive_config], ch2: [ch2_write_positive_config]
+        },
+        "wait_after_s": wait_after_write_positive_s,
+    }
+    read_entry = {
+        "name": "read",
+        "seq_configs": {ch1: [ch1_read_config], ch2: [ch2_read_config]},
+        "wait_after_s": wait_after_read_s,
+    }
+    write_negative_entry = {
+        "name": "write_negative",
+        "seq_configs": {
+            ch1: [ch1_write_negative_config], ch2: [ch2_write_negative_config]
+        },
+        "wait_after_s": wait_after_write_negative_s,
+    }
+    one_plan = (
+        [write_positive_entry, read_entry] * positive_repeat_count
+        + [write_negative_entry, read_entry] * negative_repeat_count
+    )
+    test_plan = one_plan * plan_repeat_count
+    seq_configs = {
+        ch1: [ch1_write_positive_config, ch1_read_config, ch1_write_negative_config],
+        ch2: [ch2_write_positive_config, ch2_read_config, ch2_write_negative_config],
+    }
+    validate_segment_arb_configs(seq_configs)
+    return {
+        'test_plan': test_plan,
+        'ch1_read_config': ch1_read_config,
+        'ch1_write_negative_config': ch1_write_negative_config,
+        'ch1_write_positive_config': ch1_write_positive_config,
+        'seq_configs': seq_configs,
+    }
+
+
+def _pulse_config(seq_id, voltage, time_values, meas_types, meas_start, meas_stop, *, base_v):
+    ch1_start = [base_v, voltage, voltage, base_v]
+    ch1_stop = [voltage, voltage, base_v, base_v]
     zeros = [0.0] * 4
     ch1_config = (
         seq_id, ch1_start, ch1_stop, time_values,
@@ -84,169 +178,83 @@ def _pulse_config(seq_id, voltage, time_values, meas_types, meas_start, meas_sto
     return ch1_config, ch2_config
 
 
-def _rebuild_runtime_config():
-    global BASE_V, WRITE_POSITIVE_V, WRITE_NEGATIVE_V, READ_V
-    global WRITE_POSITIVE_DWELL, WRITE_NEGATIVE_DWELL, READ_DWELL
-    global WRITE_POSITIVE_TRF, WRITE_NEGATIVE_TRF, READ_TRF
-    global WRITE_POSITIVE_IDLE, WRITE_NEGATIVE_IDLE, READ_IDLE
-    global WAIT_AFTER_WRITE_POSITIVE_S, WAIT_AFTER_READ_S, WAIT_AFTER_WRITE_NEGATIVE_S
-    global POSITIVE_REPEAT_COUNT, NEGATIVE_REPEAT_COUNT, PLAN_REPEAT_COUNT
-    global time_values_write_positive, time_values_write_negative, time_values_read
-    global ch1_write_positive_config, ch2_write_positive_config
-    global ch1_write_negative_config, ch2_write_negative_config
-    global ch1_read_config, ch2_read_config
-    global write_positive_entry, write_negative_entry, read_entry
-    global ONE_PLAN, TEST_PLAN, seq_configs, CURRENT_RANGES
-
-    BASE_V = float(params["base_v"])
-    WRITE_POSITIVE_V = float(params["write_positive_v"])
-    WRITE_NEGATIVE_V = float(params["write_negative_v"])
-    READ_V = float(params["read_v"])
-    WRITE_POSITIVE_DWELL = float(params["write_positive_dwell"])
-    WRITE_NEGATIVE_DWELL = float(params["write_negative_dwell"])
-    READ_DWELL = float(params["read_dwell"])
-    WRITE_POSITIVE_TRF = float(params["write_positive_trf"])
-    WRITE_NEGATIVE_TRF = float(params["write_negative_trf"])
-    READ_TRF = float(params["read_trf"])
-    WRITE_POSITIVE_IDLE = float(params["write_positive_idle"])
-    WRITE_NEGATIVE_IDLE = float(params["write_negative_idle"])
-    READ_IDLE = float(params["read_idle"])
-    WAIT_AFTER_WRITE_POSITIVE_S = float(params["wait_after_positive_write_s"])
-    WAIT_AFTER_READ_S = float(params["wait_after_read_s"])
-    WAIT_AFTER_WRITE_NEGATIVE_S = float(params["wait_after_negative_write_s"])
-    POSITIVE_REPEAT_COUNT = int(params["positive_repeat_count"])
-    NEGATIVE_REPEAT_COUNT = int(params["negative_repeat_count"])
-    PLAN_REPEAT_COUNT = int(params["plan_repeat_count"])
-    if min(POSITIVE_REPEAT_COUNT, NEGATIVE_REPEAT_COUNT, PLAN_REPEAT_COUNT) < 0:
-        raise ValueError("Identical V2 repeat counts cannot be negative.")
-
-    time_values_write_positive = [
-        WRITE_POSITIVE_TRF, WRITE_POSITIVE_DWELL,
-        WRITE_POSITIVE_TRF, WRITE_POSITIVE_IDLE,
-    ]
-    time_values_write_negative = [
-        WRITE_NEGATIVE_TRF, WRITE_NEGATIVE_DWELL,
-        WRITE_NEGATIVE_TRF, WRITE_NEGATIVE_IDLE,
-    ]
-    time_values_read = [READ_TRF, READ_DWELL, READ_TRF, READ_IDLE]
-    no_measure = [0, 0, 0, 0]
-    zero_windows = [0.0] * 4
-    read_types = [0, 1, 0, 0]
-    read_start = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-    read_stop = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-    ch1_write_positive_config, ch2_write_positive_config = _pulse_config(
-        WRITE_POSITIVE_SEQ_ID, WRITE_POSITIVE_V, time_values_write_positive,
-        no_measure, zero_windows, zero_windows,
-    )
-    ch1_read_config, ch2_read_config = _pulse_config(
-        READ_SEQ_ID, READ_V, time_values_read, read_types, read_start, read_stop,
-    )
-    ch1_write_negative_config, ch2_write_negative_config = _pulse_config(
-        WRITE_NEGATIVE_SEQ_ID, WRITE_NEGATIVE_V, time_values_write_negative,
-        no_measure, zero_windows, zero_windows,
-    )
-    write_positive_entry = {
-        "name": "write_positive",
-        "seq_configs": {
-            CH1: [ch1_write_positive_config], CH2: [ch2_write_positive_config]
-        },
-        "wait_after_s": WAIT_AFTER_WRITE_POSITIVE_S,
-    }
-    read_entry = {
-        "name": "read",
-        "seq_configs": {CH1: [ch1_read_config], CH2: [ch2_read_config]},
-        "wait_after_s": WAIT_AFTER_READ_S,
-    }
-    write_negative_entry = {
-        "name": "write_negative",
-        "seq_configs": {
-            CH1: [ch1_write_negative_config], CH2: [ch2_write_negative_config]
-        },
-        "wait_after_s": WAIT_AFTER_WRITE_NEGATIVE_S,
-    }
-    ONE_PLAN = (
-        [write_positive_entry, read_entry] * POSITIVE_REPEAT_COUNT
-        + [write_negative_entry, read_entry] * NEGATIVE_REPEAT_COUNT
-    )
-    TEST_PLAN = ONE_PLAN * PLAN_REPEAT_COUNT
-    # Exposed for common offline validators; execution still uses each entry.
-    seq_configs = {
-        CH1: [ch1_write_positive_config, ch1_read_config, ch1_write_negative_config],
-        CH2: [ch2_write_positive_config, ch2_read_config, ch2_write_negative_config],
-    }
-    CURRENT_RANGES = {
-        CH1: float(CURRENT_RANGES.get(CH1, next(iter(CURRENT_RANGES.values())))),
-        CH2: float(CURRENT_RANGES.get(CH2, next(iter(CURRENT_RANGES.values())))),
-    }
-    validate_segment_arb_configs(seq_configs)
-
-
-_rebuild_runtime_config()
-
-
-def configure_measurement(
-    *, params_override=None, inst=None, channels=None, current_ranges=None,
-    segarb_options=None, save_dir=None, file_stem=None,
-):
-    global INST, CH1, CH2, SAVE_DIR, FILE_STEM, CURRENT_RANGES, SEGARB_OPTIONS
-    if params_override is not None:
-        params.clear()
-        params.update(params_override)
-    if inst is not None:
-        INST = inst
-    if channels is not None:
-        CH1, CH2 = tuple(channels)
-    if current_ranges is not None:
-        CURRENT_RANGES = dict(current_ranges)
-    if segarb_options is not None:
-        SEGARB_OPTIONS = dict(segarb_options)
-    if save_dir is not None:
-        SAVE_DIR = Path(save_dir)
-    if file_stem is not None:
-        FILE_STEM = str(file_stem)
-    _rebuild_runtime_config()
-
-
 def preview_waveform(
-    output_path=None, *, show=True, title_prefix="FTJ Identical V2 CH1"
+    output_path=None,
+    *,
+    show=True,
+    title_prefix='FTJ Identical V2 CH1',
+    channels=None,
+    parameters=None,
+    waveform=None,
 ):
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
     return preview_sequence_configs(
-        [ch1_write_positive_config, ch1_read_config, ch1_write_negative_config],
+        [waveform['ch1_write_positive_config'], waveform['ch1_read_config'], waveform['ch1_write_negative_config']],
         output_path,
         title_prefix=title_prefix,
         show=show,
     )
 
 
-preview_waveforms = preview_waveform
+def run_single_test(query, test, *, channels=None, current_ranges=None, segarb_options=None):
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    current_ranges = dict(current_ranges) if current_ranges is not None else dict(zip(channels, (CURRENT_RANGES[CH1], CURRENT_RANGES[CH2])))
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
 
-
-def run_single_test(query, test):
     execute_segARB_test(
         query,
-        channels=[CH1, CH2],
+        channels=[ch1, ch2],
         seq_configs=test["seq_configs"],
-        current_ranges=CURRENT_RANGES,
-        options=SEGARB_OPTIONS,
+        seq_list={channel: [(config[0], 1) for config in configs]
+                  for channel, configs in test["seq_configs"].items()},
+        current_ranges=current_ranges,
+        options=segarb_options,
     )
-    df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
-    power_off_outputs(query, (CH1, CH2))
+    df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
+    power_off_outputs(query, (ch1, ch2))
     return df_ch1, df_ch2
 
 
-def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
-    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+def run_test(
+    params_override=None,
+    *,
+    save_results=True,
+    save_dir=None,
+    file_stem=None,
+    channels=None,
+    current_ranges=None,
+    inst=None,
+    preview_only=None,
+    segarb_options=None,
+):
+    parameters = merge_parameters(params, params_override)
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    current_ranges = dict(current_ranges) if current_ranges is not None else dict(zip(channels, (CURRENT_RANGES[CH1], CURRENT_RANGES[CH2])))
     file_stem = FILE_STEM if file_stem is None else str(file_stem)
+    inst = INST if inst is None else inst
+    preview_only = PREVIEW_ONLY if preview_only is None else preview_only
+    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+    waveform = build_waveform(parameters=parameters, channels=channels)
+
+    if preview_only:
+        return {"preview": preview_waveform(channels=channels, parameters=parameters, waveform=waveform), "output_path": None, "params": dict(parameters), "accepted_current_ranges": {}}
+
     summary_rows = []
     combined_frames = []
 
-    with PMUSession(INST, channels=(CH1, CH2)) as session:
+    with PMUSession(inst, channels=(ch1, ch2)) as session:
         query = session.query
-        for index, test in enumerate(TEST_PLAN, start=1):
-            print(f"Running {test['name']} ({index}/{len(TEST_PLAN)}) ...")
-            df_ch1, df_ch2 = run_single_test(query, test)
-            merged_df = merge_channels({CH1: df_ch1, CH2: df_ch2})
+        for index, test in enumerate(waveform['test_plan'], start=1):
+            print(f"Running {test['name']} ({index}/{len(waveform['test_plan'])}) ...")
+            df_ch1, df_ch2 = run_single_test(query, test, channels=channels, current_ranges=current_ranges, segarb_options=segarb_options)
+            merged_df = merge_channels({ch1: df_ch1, ch2: df_ch2})
             if merged_df is not None and not merged_df.empty:
                 merged_df.insert(0, "test_name", test["name"])
                 merged_df.insert(1, "test_index", index)
@@ -256,8 +264,8 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
                 {
                     "test_index": index,
                     "test_name": test["name"],
-                    f"points_ch{CH1}": 0 if df_ch1 is None else len(df_ch1),
-                    f"points_ch{CH2}": 0 if df_ch2 is None else len(df_ch2),
+                    f"points_ch{ch1}": 0 if df_ch1 is None else len(df_ch1),
+                    f"points_ch{ch2}": 0 if df_ch2 is None else len(df_ch2),
                     "wait_after_s": test["wait_after_s"],
                 }
             )
@@ -273,16 +281,16 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, params["write_positive_v"], "tw" + time_tag(params["write_positive_dwell"])),
+            save_dir, measurement_name(file_stem, parameters["write_positive_v"], "tw" + time_tag(parameters["write_positive_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {
             "saved_at": saved_at(),
-            **params,
-            "inst": INST,
-            "channels": (CH1, CH2),
-            "current_ranges": CURRENT_RANGES,
-            "segarb_options": SEGARB_OPTIONS,
+            **parameters,
+            "inst": inst,
+            "channels": (ch1, ch2),
+            "current_ranges": current_ranges,
+            "segarb_options": segarb_options,
         }
         params_df = pd.DataFrame(
             {"name": saved_params.keys(), "value": map(repr, saved_params.values())}
@@ -291,18 +299,15 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
             summary_df.to_excel(writer, sheet_name="Summary", index=False)
             combined_df.to_excel(writer, sheet_name="RawCombined", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
-    return {
+    result = {
         "summary_df": summary_df,
         "combined_df": combined_df,
         "output_path": output_path,
     }
-
-
-def main():
-    if PREVIEW_ONLY:
-        return preview_waveform()
-    return run_ftj_test()
+    result.update(params=dict(parameters), accepted_current_ranges={})
+    result["settings"] = {"inst": inst, "channels": channels, "segarb_options": segarb_options}
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    run_test()

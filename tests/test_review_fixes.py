@@ -19,6 +19,9 @@ from keithley4200.pmu.pmu_tests import (
 
 class ReviewFixTests(unittest.TestCase):
     def test_importing_pulse_entries_has_no_acquisition_or_save_side_effects(self):
+        # Initialize Matplotlib before blocking measurement output directories.
+        import matplotlib.pyplot
+
         for name in ("pulse_sweep", "pulse_train"):
             with self.subTest(name=name), mock.patch(
                 "keithley4200.pmu.session.PMUSession", side_effect=AssertionError("instrument opened")
@@ -27,7 +30,7 @@ class ReviewFixTests(unittest.TestCase):
             ):
                 # run_path also checks a fresh execution if another test imported it.
                 import runpy
-                namespace = runpy.run_path(str(ROOT / "measurements/pmu/fet" / (name + ".py")))
+                namespace = runpy.run_path(str(ROOT / "measurements/pmu/pulse" / (name + ".py")))
                 self.assertTrue(callable(namespace["main"]))
 
     def test_fet_main_uses_selected_channels(self):
@@ -38,18 +41,18 @@ class ReviewFixTests(unittest.TestCase):
                 stack.enter_context(mock.patch.multiple(module, GATE_CH=2, DRAIN_CH=1,
                     PREVIEW_ONLY=False, USE_SOURCE_SMU=False, SAVE_WAVEFORM_PREVIEW=False,
                     PMUSession=DryRunSession))
-                stack.enter_context(mock.patch.dict(module.PARAMS, {"read_delay": 1e-3}))
+                stack.enter_context(mock.patch.dict(module.params, {"read_delay": 1e-3}))
                 stack.enter_context(mock.patch.object(module, "reserve_output_stem", return_value=Path("offline")))
                 save = stack.enter_context(mock.patch.object(module, "save_fet_workbook"))
                 stack.enter_context(mock.patch.object(module, "save_ids_dual_axis_plot"))
-                module.main()
+                module.run_test(preview_only=False)
                 data = save.call_args.args[1]
                 self.assertEqual(data["Ig"].tolist(), data["Current 2"].tolist())
                 self.assertEqual(data["Id"].tolist(), data["Current 1"].tolist())
                 self.assertEqual(data["MeasuredVg"].tolist(), data["Voltage 2"].tolist())
                 self.assertEqual(data["MeasuredVd"].tolist(), data["Voltage 1"].tolist())
                 self.assertNotEqual(data["Ig"].tolist(), data["Id"].tolist())
-                self.assertEqual(module.PARAMS["max_segments_per_sequence"], 2048)
+                self.assertEqual(module.params["max_segments_per_sequence"], 2048)
                 self.assertEqual(module.MAX_SEGMENTS_PER_SEQUENCE, MAX_SEGMENTS_PER_SEQUENCE)
 
     def test_segment_limit_accepts_2048_and_rejects_2049_before_commands(self):
@@ -105,7 +108,7 @@ class ReviewFixTests(unittest.TestCase):
                 self.assertFalse(data["df_total"].empty)
 
     def test_pulse_high_low_data_use_real_reader(self):
-        module = importlib.import_module("measurements.pmu.fet.pulse_train")
+        module = importlib.import_module("measurements.pmu.pulse.pulse_train")
         for acquisition in ((True, True), (False, True), (True, False)):
             with self.subTest(acquisition=acquisition), redirect_stdout(io.StringIO()):
                 state = DryRunState()

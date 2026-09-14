@@ -24,6 +24,7 @@ from keithley4200.pmu.pmu_tests import (
     validate_segment_arb_configs,
 )
 from keithley4200.pmu.session import PMUSession
+from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
 from keithley4200.tools.waveform_preview import preview_sequence_configs
 
 
@@ -73,14 +74,106 @@ def voltage_steps(start, stop, steps):
     return [float(start) + index * step for index in range(int(steps))]
 
 
-def make_ispp_sequence(seq_id, voltages):
+def build_waveform(*, parameters=None, channels=None):
+    """Build pulse arrays and execution metadata from this run's parameters."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    base_v = float(parameters["base_v"])
+    read_v = float(parameters["read_v"])
+    pos_v_start = float(parameters["positive_start_v"])
+    pos_v_stop = float(parameters["positive_stop_v"])
+    pos_steps = int(parameters["positive_steps"])
+    neg_v_start = float(parameters["negative_start_v"])
+    neg_v_stop = float(parameters["negative_stop_v"])
+    neg_steps = int(parameters["negative_steps"])
+    write_dwell = float(parameters["write_dwell"])
+    read_dwell = float(parameters["read_dwell"])
+    pre_delay = float(parameters["pre_delay"])
+    rise_time = float(parameters["rise_time"])
+    fall_time = float(parameters["fall_time"])
+    idle_time = float(parameters["idle_time"])
+    time_values_write = [pre_delay, rise_time, write_dwell, fall_time, idle_time]
+    time_values_read = [pre_delay, rise_time, read_dwell, fall_time, idle_time]
+    meas_types_write = [0, 0, 1, 0, 0]
+    meas_start_write = [0.0, 0.0, write_dwell * 0.5, 0.0, 0.0]
+    meas_stop_write = [0.0, 0.0, write_dwell * 0.9, 0.0, 0.0]
+    meas_types_read = [0, 0, 1, 0, 0]
+    meas_start_read = [0.0, 0.0, read_dwell * 0.5, 0.0, 0.0]
+    meas_stop_read = [0.0, 0.0, read_dwell * 0.9, 0.0, 0.0]
+    pos_voltages = voltage_steps(pos_v_start, pos_v_stop, pos_steps)
+    neg_voltages = voltage_steps(neg_v_start, neg_v_stop, neg_steps)
+    ch1_pos_config, ch2_pos_config = make_ispp_sequence(
+        WRITE_POSITIVE_SEQ_ID, pos_voltages,
+        base_v=base_v,
+        meas_start_read=meas_start_read,
+        meas_start_write=meas_start_write,
+        meas_stop_read=meas_stop_read,
+        meas_stop_write=meas_stop_write,
+        meas_types_read=meas_types_read,
+        meas_types_write=meas_types_write,
+        read_v=read_v,
+        time_values_read=time_values_read,
+        time_values_write=time_values_write,
+    )
+    ch1_neg_config, ch2_neg_config = make_ispp_sequence(
+        WRITE_NEGATIVE_SEQ_ID, neg_voltages,
+        base_v=base_v,
+        meas_start_read=meas_start_read,
+        meas_start_write=meas_start_write,
+        meas_stop_read=meas_stop_read,
+        meas_stop_write=meas_stop_write,
+        meas_types_read=meas_types_read,
+        meas_types_write=meas_types_write,
+        read_v=read_v,
+        time_values_read=time_values_read,
+        time_values_write=time_values_write,
+    )
+    seq_configs = {
+        ch1: [ch1_pos_config, ch1_neg_config],
+        ch2: [ch2_pos_config, ch2_neg_config],
+    }
+    seq_plan = [(WRITE_POSITIVE_SEQ_ID, 1), (WRITE_NEGATIVE_SEQ_ID, 1)]
+    seq_list = {ch1: list(seq_plan), ch2: list(seq_plan)}
+    validate_segment_arb_configs(seq_configs)
+    return {
+        'neg_voltages': neg_voltages,
+        'pos_voltages': pos_voltages,
+        'read_dwell': read_dwell,
+        'read_v': read_v,
+        'seq_list': seq_list,
+        'write_dwell': write_dwell,
+        'ch1_neg_config': ch1_neg_config,
+        'ch1_pos_config': ch1_pos_config,
+        'seq_configs': seq_configs,
+        'time_values_read': time_values_read,
+        'time_values_write': time_values_write,
+    }
+
+
+def make_ispp_sequence(
+    seq_id,
+    voltages,
+    *,
+    base_v,
+    meas_start_read,
+    meas_start_write,
+    meas_stop_read,
+    meas_stop_write,
+    meas_types_read,
+    meas_types_write,
+    read_v,
+    time_values_read,
+    time_values_write,
+):
     arrays = {
         "ch1_start": [], "ch1_stop": [], "ch2_start": [], "ch2_stop": [],
         "times": [], "types": [], "starts": [], "stops": [],
     }
     for voltage in voltages:
-        arrays["ch1_start"].extend([BASE_V, BASE_V, voltage, voltage, BASE_V])
-        arrays["ch1_stop"].extend([BASE_V, voltage, voltage, BASE_V, BASE_V])
+        arrays["ch1_start"].extend([base_v, base_v, voltage, voltage, base_v])
+        arrays["ch1_stop"].extend([base_v, voltage, voltage, base_v, base_v])
         arrays["ch2_start"].extend([0.0] * 5)
         arrays["ch2_stop"].extend([0.0] * 5)
         arrays["times"].extend(time_values_write)
@@ -88,8 +181,8 @@ def make_ispp_sequence(seq_id, voltages):
         arrays["starts"].extend(meas_start_write)
         arrays["stops"].extend(meas_stop_write)
 
-        arrays["ch1_start"].extend([BASE_V, BASE_V, READ_V, READ_V, BASE_V])
-        arrays["ch1_stop"].extend([BASE_V, READ_V, READ_V, BASE_V, BASE_V])
+        arrays["ch1_start"].extend([base_v, base_v, read_v, read_v, base_v])
+        arrays["ch1_stop"].extend([base_v, read_v, read_v, base_v, base_v])
         arrays["ch2_start"].extend([0.0] * 5)
         arrays["ch2_stop"].extend([0.0] * 5)
         arrays["times"].extend(time_values_read)
@@ -113,151 +206,109 @@ def make_ispp_sequence(seq_id, voltages):
     return ch1_config, ch2_config
 
 
-def _rebuild_runtime_config():
-    global BASE_V, READ_V, POS_V_START, POS_V_STOP, POS_STEPS
-    global NEG_V_START, NEG_V_STOP, NEG_STEPS
-    global WRITE_DWELL, READ_DWELL, PRE_DELAY, RISE_TIME, FALL_TIME, IDLE_TIME
-    global time_values_write, time_values_read
-    global meas_types_write, meas_start_write, meas_stop_write
-    global meas_types_read, meas_start_read, meas_stop_read
-    global POS_VOLTAGES, NEG_VOLTAGES
-    global ch1_pos_config, ch2_pos_config, ch1_neg_config, ch2_neg_config
-    global seq_configs, SEQ_PLAN, SEQ_LIST, CURRENT_RANGES
-
-    BASE_V = float(params["base_v"])
-    READ_V = float(params["read_v"])
-    POS_V_START = float(params["positive_start_v"])
-    POS_V_STOP = float(params["positive_stop_v"])
-    POS_STEPS = int(params["positive_steps"])
-    NEG_V_START = float(params["negative_start_v"])
-    NEG_V_STOP = float(params["negative_stop_v"])
-    NEG_STEPS = int(params["negative_steps"])
-    WRITE_DWELL = float(params["write_dwell"])
-    READ_DWELL = float(params["read_dwell"])
-    PRE_DELAY = float(params["pre_delay"])
-    RISE_TIME = float(params["rise_time"])
-    FALL_TIME = float(params["fall_time"])
-    IDLE_TIME = float(params["idle_time"])
-
-    time_values_write = [PRE_DELAY, RISE_TIME, WRITE_DWELL, FALL_TIME, IDLE_TIME]
-    time_values_read = [PRE_DELAY, RISE_TIME, READ_DWELL, FALL_TIME, IDLE_TIME]
-    # V2 intentionally measures both write and read dwell segments.
-    meas_types_write = [0, 0, 1, 0, 0]
-    meas_start_write = [0.0, 0.0, WRITE_DWELL * 0.5, 0.0, 0.0]
-    meas_stop_write = [0.0, 0.0, WRITE_DWELL * 0.9, 0.0, 0.0]
-    meas_types_read = [0, 0, 1, 0, 0]
-    meas_start_read = [0.0, 0.0, READ_DWELL * 0.5, 0.0, 0.0]
-    meas_stop_read = [0.0, 0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-    POS_VOLTAGES = voltage_steps(POS_V_START, POS_V_STOP, POS_STEPS)
-    NEG_VOLTAGES = voltage_steps(NEG_V_START, NEG_V_STOP, NEG_STEPS)
-    ch1_pos_config, ch2_pos_config = make_ispp_sequence(
-        WRITE_POSITIVE_SEQ_ID, POS_VOLTAGES
-    )
-    ch1_neg_config, ch2_neg_config = make_ispp_sequence(
-        WRITE_NEGATIVE_SEQ_ID, NEG_VOLTAGES
-    )
-    seq_configs = {
-        CH1: [ch1_pos_config, ch1_neg_config],
-        CH2: [ch2_pos_config, ch2_neg_config],
-    }
-    SEQ_PLAN = [(WRITE_POSITIVE_SEQ_ID, 1), (WRITE_NEGATIVE_SEQ_ID, 1)]
-    SEQ_LIST = {CH1: list(SEQ_PLAN), CH2: list(SEQ_PLAN)}
-    CURRENT_RANGES = {
-        CH1: float(CURRENT_RANGES.get(CH1, next(iter(CURRENT_RANGES.values())))),
-        CH2: float(CURRENT_RANGES.get(CH2, next(iter(CURRENT_RANGES.values())))),
-    }
-    validate_segment_arb_configs(seq_configs)
-
-
-_rebuild_runtime_config()
-
-
-def configure_measurement(
-    *, params_override=None, inst=None, channels=None, current_ranges=None,
-    segarb_options=None, save_dir=None, file_stem=None,
+def preview_waveform(
+    output_path=None,
+    *,
+    show=True,
+    title_prefix='FTJ ISPP V2 CH1',
+    channels=None,
+    parameters=None,
+    waveform=None,
 ):
-    global INST, CH1, CH2, SAVE_DIR, FILE_STEM, CURRENT_RANGES, SEGARB_OPTIONS
-    if params_override is not None:
-        params.clear()
-        params.update(params_override)
-    if inst is not None:
-        INST = inst
-    if channels is not None:
-        CH1, CH2 = tuple(channels)
-    if current_ranges is not None:
-        CURRENT_RANGES = dict(current_ranges)
-    if segarb_options is not None:
-        SEGARB_OPTIONS = dict(segarb_options)
-    if save_dir is not None:
-        SAVE_DIR = Path(save_dir)
-    if file_stem is not None:
-        FILE_STEM = str(file_stem)
-    _rebuild_runtime_config()
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
 
-
-def preview_waveform(output_path=None, *, show=True, title_prefix="FTJ ISPP V2 CH1"):
     return preview_sequence_configs(
-        [ch1_pos_config, ch1_neg_config],
+        [waveform['ch1_pos_config'], waveform['ch1_neg_config']],
         output_path,
         title_prefix=title_prefix,
         show=show,
     )
 
 
-def build_waveform_trace_table():
+def build_waveform_trace_table(*, channels=None, parameters=None, waveform=None):
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
     rows = []
     elapsed = 0.0
-    for polarity, voltages in (("positive", POS_VOLTAGES), ("negative", NEG_VOLTAGES)):
+    for polarity, voltages in (("positive", waveform['pos_voltages']), ("negative", waveform['neg_voltages'])):
         for voltage in voltages:
             rows.append(
                 {
                     "Polarity": polarity,
                     "WriteVoltage_V": voltage,
-                    "ReadVoltage_V": READ_V,
-                    "WriteDwell_s": WRITE_DWELL,
-                    "ReadDwell_s": READ_DWELL,
+                    "ReadVoltage_V": waveform['read_v'],
+                    "WriteDwell_s": waveform['write_dwell'],
+                    "ReadDwell_s": waveform['read_dwell'],
                     "BlockStart_s": elapsed,
                 }
             )
-            elapsed += sum(time_values_write) + sum(time_values_read)
+            elapsed += sum(waveform['time_values_write']) + sum(waveform['time_values_read'])
     return pd.DataFrame(rows)
 
 
-def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
-    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+def run_test(
+    params_override=None,
+    *,
+    save_results=True,
+    save_dir=None,
+    file_stem=None,
+    channels=None,
+    current_ranges=None,
+    inst=None,
+    preview_only=None,
+    segarb_options=None,
+):
+    parameters = merge_parameters(params, params_override)
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    current_ranges = dict(current_ranges) if current_ranges is not None else dict(zip(channels, (CURRENT_RANGES[CH1], CURRENT_RANGES[CH2])))
     file_stem = FILE_STEM if file_stem is None else str(file_stem)
-    with PMUSession(INST, channels=(CH1, CH2)) as session:
+    inst = INST if inst is None else inst
+    preview_only = PREVIEW_ONLY if preview_only is None else preview_only
+    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+    waveform = build_waveform(parameters=parameters, channels=channels)
+
+    if preview_only:
+        return {"preview": preview_waveform(channels=channels, parameters=parameters, waveform=waveform), "output_path": None, "params": dict(parameters), "accepted_current_ranges": {}}
+
+    with PMUSession(inst, channels=(ch1, ch2)) as session:
         query = session.query
         execute_segARB_test(
             query,
-            channels=[CH1, CH2],
-            seq_configs=seq_configs,
-            seq_list=SEQ_LIST,
-            current_ranges=CURRENT_RANGES,
-            options=SEGARB_OPTIONS,
+            channels=[ch1, ch2],
+            seq_configs=waveform['seq_configs'],
+            seq_list=waveform['seq_list'],
+            current_ranges=current_ranges,
+            options=segarb_options,
         )
-        df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
-        power_off_outputs(query, (CH1, CH2))
+        df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
+        power_off_outputs(query, (ch1, ch2))
 
     if df_ch1 is None and df_ch2 is None:
         raise ValueError("No data returned from the FTJ ISPP V2 run.")
 
-    waveform_df = build_waveform_trace_table()
+    waveform_df = build_waveform_trace_table(channels=channels, parameters=parameters, waveform=waveform)
     output_path = None
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, params["positive_stop_v"], "tw" + time_tag(params["write_dwell"])),
+            save_dir, measurement_name(file_stem, parameters["positive_stop_v"], "tw" + time_tag(parameters["write_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {
             "saved_at": saved_at(),
-            **params,
-            "inst": INST,
-            "channels": (CH1, CH2),
-            "current_ranges": CURRENT_RANGES,
-            "segarb_options": SEGARB_OPTIONS,
+            **parameters,
+            "inst": inst,
+            "channels": (ch1, ch2),
+            "current_ranges": current_ranges,
+            "segarb_options": segarb_options,
         }
         params_df = pd.DataFrame(
             {"name": saved_params.keys(), "value": map(repr, saved_params.values())}
@@ -269,19 +320,16 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
                 df_ch2.to_excel(writer, sheet_name="Channel_2", index=False)
             waveform_df.to_excel(writer, sheet_name="Waveform", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
-    return {
+    result = {
         "df_ch1": df_ch1,
         "df_ch2": df_ch2,
         "waveform_df": waveform_df,
         "output_path": output_path,
     }
-
-
-def main():
-    if PREVIEW_ONLY:
-        return preview_waveform()
-    return run_ftj_test()
+    result.update(params=dict(parameters), accepted_current_ranges={})
+    result["settings"] = {"inst": inst, "channels": channels, "segarb_options": segarb_options}
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    run_test()

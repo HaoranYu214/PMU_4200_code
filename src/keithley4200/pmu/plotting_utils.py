@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 # PMU plotting helpers.
 """
-绘图工具模块 - 专门处理 Keithley 4200A 测试数据的可视化
-包含：PlotManager, 各种绘图函数
+Plot management and visualization helpers for Keithley 4200A data.
 """
 
 import numpy as np
@@ -15,11 +14,11 @@ from pathlib import Path
 
 class PlotManager:
     """
-    统一的绘图管理器
+    Manage figure display and saving within a context.
     mode:
-      - 'batched'  ：先都画完，退出 with 时一次性 show（阻塞与否由 block 决定）
-      - 'headless' ：不展示（适合服务器/批处理）
-      - 'save'     ：不展示，直接保存到批次目录（自动编号）
+      - 'batched': show all figures on context exit; block controls blocking.
+      - 'headless': close figures without displaying them.
+      - 'save': save directly to the configured directory with reserved run numbers.
     """
     def __init__(self, mode='batched', block=True, close_after_show=False,
                  save_dir="outputs", save_ext="png", save_dpi=150,
@@ -30,7 +29,7 @@ class PlotManager:
         self._figs = []
         self._interactive_prev = plt.isinteractive()
 
-        # 保存相关
+        # Output settings
         self.save_dir = Path(save_dir)
         self.save_ext = save_ext
         self.save_dpi = save_dpi
@@ -41,9 +40,9 @@ class PlotManager:
 
     def __enter__(self):
         if self.mode == 'batched':
-            plt.ion()     # 仅批量展示时开交互，避免中途阻塞
+            plt.ion()     # Build all figures without blocking between plots.
         else:  # 'save' / 'headless'
-            plt.ioff()    # 关闭交互，不会弹窗
+            plt.ioff()    # Disable interactive display.
         return self
 
     def add(self, fig, name=None):
@@ -68,10 +67,10 @@ class PlotManager:
         try:
             if self.mode == 'batched':
                 if self.block:
-                    plt.ioff()                 # 关交互 → 阻塞 show
+                    plt.ioff()                 # Blocking display.
                     plt.show(block=True)
                 else:
-                    plt.ion()                  # 开交互 → 非阻塞 show
+                    plt.ion()                  # Nonblocking display.
                     plt.show(block=False)
                 if self.close_after_show:
                     for f in self._figs:
@@ -81,7 +80,7 @@ class PlotManager:
                 for f in self._figs:
                     try: plt.close(f)
                     except: pass
-            # save 模式在 add 时已保存+关闭
+            # Save mode already saved and closed figures in add().
         finally:
             if self._interactive_prev:
                 plt.ion()
@@ -91,8 +90,8 @@ class PlotManager:
 
 def apply_symlog_with_ticks(ax, data, linthresh=1e-12, max_decades=8, unit=""):
     """
-    对 ax 应用 symlog，并为 data 手动生成对称对数刻度（含 0 与线性阈值）。
-    unit: 刻度标签后缀 (例如 "A", "Ω")
+    Apply symlog with symmetric ticks, including zero and the linear threshold.
+    unit: tick-label suffix, such as "A" or "ohm".
     """
     data = np.asarray(data)
     data = data[np.isfinite(data)]
@@ -128,22 +127,22 @@ def apply_symlog_with_ticks(ax, data, linthresh=1e-12, max_decades=8, unit=""):
 def plot_time_series(df, channels=(1, 2), width_us=None, amp_v=None, 
                     resistance_scale='log', show=False, return_fig=True):
     """
-    统一的时序绘图函数 - 自动检测数据类型并绘制电压/电流/电阻
+    Plot available voltage, current, and resistance versus time.
     
     Args:
-        df: 数据DataFrame
-        channels: 通道列表，默认 (1, 2)
-        width_us: 脉宽(μs)，用于标题显示
-        amp_v: 幅度(V)，用于标题显示
-        resistance_scale: 电阻坐标模式，'log'=对数坐标，'linear'=线性坐标
-        show: 是否立即显示
-        return_fig: 是否返回Figure对象
+        df: measured data as a DataFrame
+        channels: channel numbers, default (1, 2)
+        width_us: pulse width in microseconds, used only in the title
+        amp_v: amplitude in volts, used only in the title
+        resistance_scale: 'log' uses symmetric log, 'linear' uses linear axes
+        show: display immediately when True
+        return_fig: return the Figure when True
     """
     if df is None or df.empty:
         print("⚠️ 无数据，跳过绘图")
         return None
 
-    # 检测可用的数据类型
+    # Detect available measurements.
     data_types = []
     if any(f"Voltage {ch}" in df.columns for ch in channels):
         data_types.append('voltage')
@@ -156,20 +155,20 @@ def plot_time_series(df, channels=(1, 2), width_us=None, amp_v=None,
         print("⚠️ 未找到可绘制的数据列")
         return None
 
-    # 创建子图
+    # Allocate one subplot per measurement type.
     n_plots = len(data_types)
     fig, axes = plt.subplots(n_plots, 1, figsize=(12, 4 * n_plots))
     if n_plots == 1:
         axes = [axes]
 
-    # 标题
+    # Figure title
     suffix = []
     if width_us is not None: suffix.append(f"{width_us} µs")
     if amp_v is not None:    suffix.append(f"{amp_v} V")
     title = "Dual-channel Measurements" + (" - " + ", ".join(suffix) if suffix else "")
     fig.suptitle(title, fontsize=14, fontweight='bold')
 
-    # 颜色和标记
+    # Channel colors and measurement markers
     colors = {1: 'darkred', 2: 'darkblue'}
     markers = {'voltage': 'o', 'current': '^', 'resistance': 'd'}
     units = {'voltage': 'V', 'current': 'A', 'resistance': 'Ω'}
@@ -185,7 +184,7 @@ def plot_time_series(df, channels=(1, 2), width_us=None, amp_v=None,
                 data = df[col_data]
                 time = df[col_time]
                 
-                # 过滤有效数据
+                # Keep finite resistance values.
                 if data_type == 'resistance':
                     valid = np.isfinite(data)
                     if valid.any():
@@ -194,19 +193,19 @@ def plot_time_series(df, channels=(1, 2), width_us=None, amp_v=None,
                     else:
                         continue
                 
-                # 绘制
+                # Plot the selected channel.
                 ax.plot(time, data, 
                        color=colors[ch], linewidth=1.5, 
                        marker=markers[data_type], markersize=3,
                        markerfacecolor=colors[ch], markeredgecolor=colors[ch],
                        label=f'Channel {ch} {data_type.title()}', alpha=0.8)
         
-        # 设置轴标签和格式
+        # Label axes with physical units.
         unit = units[data_type]
         ax.set_ylabel(f"{data_type.title()} ({unit})")
         ax.set_title(f"{data_type.title()} vs Time")
         
-        # 电阻坐标处理（可选对数/线性）
+        # Apply the requested resistance scale.
         if data_type == 'resistance' and resistance_scale == 'log':
             all_res_data = []
             for ch in channels:
@@ -222,7 +221,7 @@ def plot_time_series(df, channels=(1, 2), width_us=None, amp_v=None,
         ax.grid(True, alpha=0.3)
         ax.legend()
         
-        # 最后一个子图添加时间轴标签
+        # Label time on the final subplot.
         if i == len(data_types) - 1:
             ax.set_xlabel("Time (s)")
 
@@ -234,7 +233,7 @@ def plot_time_series(df, channels=(1, 2), width_us=None, amp_v=None,
 def plot_iv_characteristics(df, channels=(1, 2), width_us=None, amp_v=None,
                            current_linthresh=1e-12, show=False, return_fig=True):
     """
-    I-V特性曲线绘图
+    Plot current versus voltage with a symmetric-log current axis.
     """
     if df is None or df.empty:
         print("⚠️ 无数据，跳过I-V图")
@@ -242,7 +241,7 @@ def plot_iv_characteristics(df, channels=(1, 2), width_us=None, amp_v=None,
 
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
     
-    # 标题
+    # Figure title
     suffix = []
     if width_us is not None: suffix.append(f"{width_us} µs")
     if amp_v is not None:    suffix.append(f"{amp_v} V")
@@ -267,7 +266,7 @@ def plot_iv_characteristics(df, channels=(1, 2), width_us=None, amp_v=None,
     ax.set_xlabel("Voltage (V)")
     ax.set_ylabel("Current (A)")
     
-    # 电流轴使用对数坐标
+    # Use a symmetric-log current axis to retain sign and zero.
     all_currents = []
     for ch in channels:
         i_col = f"Current {ch}"
@@ -285,19 +284,19 @@ def plot_iv_characteristics(df, channels=(1, 2), width_us=None, amp_v=None,
     return fig if return_fig else None
 
 
-# 为了向后兼容，保留原来的函数名
+# Legacy names retained for existing callers; all render available data types.
 def plot_currents(df, width_us=None, amp_v=None, show=False, return_fig=True):
-    """向后兼容的电流绘图函数"""
+    """Legacy entry for the combined time-series plot."""
     return plot_time_series(df, channels=(1, 2), width_us=width_us, amp_v=amp_v, 
                            show=show, return_fig=return_fig)
 
 def plot_voltages(df, width_us=None, amp_v=None, show=False, return_fig=True):
-    """向后兼容的电压绘图函数"""
+    """Legacy entry for the combined time-series plot."""
     return plot_time_series(df, channels=(1, 2), width_us=width_us, amp_v=amp_v, 
                            show=show, return_fig=return_fig)
 
 def plot_resistances(df, width_us=None, amp_v=None, res_min=1.0, 
                     resistance_scale='log', show=False, return_fig=True):
-    """向后兼容的电阻绘图函数"""
+    """Legacy time-series entry; res_min is unused, filter resistance before plotting."""
     return plot_time_series(df, channels=(1, 2), width_us=width_us, amp_v=amp_v, 
                            resistance_scale=resistance_scale, show=show, return_fig=return_fig)

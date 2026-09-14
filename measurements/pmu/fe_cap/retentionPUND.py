@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Triangular-pulse PUND segARB test with branch-aware integration."""
+"""Output-off retention PUND with explicit split executions and host timing."""
 
 from pathlib import Path
 import sys
@@ -17,21 +17,17 @@ for path in (SRC_ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from keithley4200.tools.waveform_preview import preview_sequence_configs
 from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at
-from keithley4200.pmu.current_range import acquire_with_auto_current_range
-from keithley4200.pmu.data_processing import read_both_channels
-from keithley4200.pmu.pmu_tests import execute_segARB_test, power_off_outputs
 from keithley4200.pmu.session import PMUSession
 from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
-from keithley4200.parameter_defaults import remember_current_ranges
+from measurements.pmu.fe_cap._retention import execute_plan, validate_plan, save_raw, preview_plan
 
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 params = dict(
     rise_time=2.5e-4,
-    delay_time=1e-3,
+    delay_time=1.0,
     offset_ramp_time=1e-4,
     Vp=4.5,
     offset=0,
@@ -48,8 +44,8 @@ SEGARB_OPTIONS = {
     "ENABLE_LLEC": False,
 }
 
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\10-09-2026\04A1_2700_1200_300\L20_2\PUND_Break")
-PREVIEW_ONLY = False
+SAVE_DIR = Path.home() / "Documents" / "data" / "retentionPUND"
+PREVIEW_ONLY = True
 
 PULSE_SEGMENTS = {
     "Preset": (2, 3),
@@ -169,7 +165,7 @@ def build_fname_base(*, parameters=None, save_dir=None):
     save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
 
     name = measurement_name(
-        "PUNDtri", parameters["Vp"], "tr" + time_tag(parameters["rise_time"]),
+        "retentionPUND", parameters["Vp"], "tr" + time_tag(parameters["rise_time"]),
         "td" + time_tag(parameters["delay_time"]),
     )
     return reserve_output_stem(save_dir, name)
@@ -255,20 +251,48 @@ def make_pund_seq_configs(*, channels=None, parameters=None):
     return {ch1: [ch1_config], ch2: [ch2_config]}
 
 
-def preview_waveform(output_path=None, *, show=True, title_prefix=None, channels=None, parameters=None):
-    """Preview the triangular PUND waveform without connecting to the PMU."""
+def make_retention_plan(*, channels=None, parameters=None):
+    """Execute Preset/P/U/N/D separately, with the same inter-pulse host delay."""
     parameters = params if parameters is None else parameters
     channels = tuple(channels) if channels is not None else (CH1, CH2)
     ch1, ch2 = channels
 
-    return preview_sequence_configs(
-        make_pund_seq_configs(channels=channels, parameters=parameters)[ch1],
-        output_path,
-        title_prefix=(
-            "Triangular PUND CH1" if title_prefix is None else title_prefix
-        ),
-        show=show,
-    )
+    configs = make_pund_seq_configs(channels=channels, parameters=parameters)
+    return [
+        dict(label=label, delay_before_s=0.0 if label == "Preset" else parameters["delay_time"],
+             configs={ch: [(1, *(list(values[first:last+1]) for values in cfgs[0][1:]))]
+                      for ch, cfgs in configs.items()})
+        for label, (first, last) in PULSE_SEGMENTS.items()
+    ]
+
+
+def preview_waveform(
+    output_path=None,
+    *,
+    show=True,
+    compress_delay=True,
+    title_prefix=None,
+    channels=None,
+    parameters=None,
+):
+    """Show execution boundaries, acquisition windows and output-off waits."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    plan = make_retention_plan(channels=channels, parameters=parameters)
+    validate_plan(plan, (ch1, ch2), parameters)
+    fig = preview_plan(plan, ch1, show=False, compress_delay=compress_delay,
+                       title_prefix=title_prefix or "retentionPUND")
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=150)
+        plt.close(fig)
+        return output_path
+    if show:
+        plt.show()
+    return fig
 
 
 def build_params_table(*, channels=None, inst=None, parameters=None, segarb_options=None):
@@ -284,81 +308,16 @@ def build_params_table(*, channels=None, inst=None, parameters=None, segarb_opti
         {"name": name, "value": repr(value)}
         for name, value in segarb_options.items()
     )
+    rows.extend({"name": k, "value": repr(v)} for k, v in {
+        "wait_state": "output_off", "execution_mode": "software_split",
+        "timing_basis": "host_estimate", "auto_range": False,
+    }.items())
     rows.extend([
         {"name": "inst", "value": inst},
         {"name": "channels", "value": repr((ch1, ch2))},
     ])
     rows.append({"name": "saved_at", "value": saved_at()})
     return pd.DataFrame(rows)
-
-
-def save_pund_workbook(
-    output_path,
-    df_ch1,
-    df_ch2,
-    data,
-    *,
-    channels=None,
-    inst=None,
-    parameters=None,
-    segarb_options=None,
-):
-    """Save raw data, analysis data, and parameters into one Excel workbook."""
-    parameters = params if parameters is None else parameters
-    channels = tuple(channels) if channels is not None else (CH1, CH2)
-    ch1, ch2 = channels
-    inst = INST if inst is None else inst
-    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
-
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        df_ch1.to_excel(writer, sheet_name="Channel_1", index=False)
-        df_ch2.to_excel(writer, sheet_name="Channel_2", index=False)
-        data["df_total"].to_excel(writer, sheet_name="Total", index=False)
-        data["pund_diff"].to_excel(writer, sheet_name="PUND_Diff", index=False)
-        build_params_table(channels=channels, inst=inst, parameters=parameters, segarb_options=segarb_options).to_excel(writer, sheet_name="Parameters", index=False)
-    return Path(output_path)
-
-
-def acquire_with_auto_range(query, *, channels=None, parameters=None, segarb_options=None):
-    """Acquire triangular PUND data using the shared automatic range helper."""
-    parameters = params if parameters is None else parameters
-    channels = tuple(channels) if channels is not None else (CH1, CH2)
-    ch1, ch2 = channels
-    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
-
-    def acquire_once(ranges):
-        current_ranges = {ch1: ranges["Irange1"], ch2: ranges["Irange2"]}
-        execute_segARB_test(
-            query,
-            [ch1, ch2],
-            make_pund_seq_configs(channels=channels, parameters=parameters),
-            current_ranges=current_ranges,
-            options=segarb_options,
-        )
-        df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
-        power_off_outputs(query, (ch1, ch2))
-        if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
-            raise ValueError(
-                "Triangular PUND returned empty channel data during range check."
-            )
-        return df_ch1, df_ch2
-
-    result, final_ranges, _assessments = acquire_with_auto_current_range(
-        acquire_once,
-        {
-            "Irange1": parameters["Irange1"],
-            "Irange2": parameters["Irange2"],
-        },
-        {
-            "Irange1": lambda data: data[0][f"Current {ch1}"].to_numpy(),
-            "Irange2": lambda data: data[1][f"Current {ch2}"].to_numpy(),
-        },
-        labels={"Irange1": "I1", "Irange2": "I2"},
-        test_name="Triangular PUND",
-    )
-    remember_current_ranges(params, final_ranges, __file__)
-    parameters.update(final_ranges)
-    return result
 
 
 def analyze_pund_triangle_diff(df_ch1, df_ch2, *, channels=None, parameters=None):
@@ -391,11 +350,18 @@ def analyze_pund_triangle_diff(df_ch1, df_ch2, *, channels=None, parameters=None
 
     measured_segments = [index for index, mode in enumerate(meas_types) if mode != 0]
     measured_durations = [max(0.0, meas_stop[index] - meas_start[index]) for index in measured_segments]
-    segment_slices, segment_counts = _allocate_segment_slices(
-        len(i_total),
-        measured_segments,
-        measured_durations,
-    )
+    if not df_ch1["Stage"].equals(df_ch2["Stage"]):
+        raise ValueError("PUND channel stage labels differ.")
+    segment_slices, count_by_segment = {}, {}
+    for label, segments in PULSE_SEGMENTS.items():
+        indices = np.flatnonzero(df_ch1["Stage"].to_numpy() == label)
+        if len(indices) < 4 or not np.all(np.diff(indices) == 1):
+            raise ValueError(f"Missing or insufficient contiguous data for {label}.")
+        split = len(indices) // 2
+        for segment, lo, hi in ((segments[0], 0, split), (segments[1], split, len(indices))):
+            segment_slices[segment] = slice(int(indices[0])+lo, int(indices[0])+hi)
+            count_by_segment[segment] = hi-lo
+    segment_counts = [count_by_segment[i] for i in measured_segments]
 
     pulses = {}
     for label, segments in PULSE_SEGMENTS.items():
@@ -426,12 +392,18 @@ def analyze_pund_triangle_diff(df_ch1, df_ch2, *, channels=None, parameters=None
             first_branch = pulses[first][branch_index]
             second_branch = pulses[second][branch_index]
             point_count = min(len(first_branch["current"]), len(second_branch["current"]))
+            if point_count < 2:
+                raise ValueError("Too few samples in a retention PUND branch.")
+            grid = np.linspace(0.0, 1.0, point_count)
+            def resample(branch, key):
+                values = branch[key]
+                return np.interp(grid, np.linspace(0.0, 1.0, len(values)), values)
             branches.append(
                 (
                     branch_name,
-                    first_branch["voltage"][:point_count],
-                    first_branch["current"][:point_count] - second_branch["current"][:point_count],
-                    first_branch["current_i1"][:point_count] - second_branch["current_i1"][:point_count],
+                    resample(first_branch, "voltage"),
+                    resample(first_branch, "current") - resample(second_branch, "current"),
+                    resample(first_branch, "current_i1") - resample(second_branch, "current_i1"),
                     min(first_branch["duration"], second_branch["duration"]),
                 )
             )
@@ -466,7 +438,7 @@ def run_test(
     save_dir=None,
     segarb_options=None,
 ):
-    """Run the PUND measurement and save raw/analysis files."""
+    """Run the complete retention protocol once with fixed current ranges."""
     parameters = merge_parameters(params, params_override)
     channels = tuple(channels) if channels is not None else (CH1, CH2)
     ch1, ch2 = channels
@@ -478,57 +450,40 @@ def run_test(
     if preview_only:
         return {"preview": preview_waveform(channels=channels, parameters=parameters), "output_path": None, "params": dict(parameters), "accepted_current_ranges": {}}
 
-    with PMUSession(inst, channels=(ch1, ch2)) as session:
-        Q = session.query
-        print("Running PUND...")
-        df_ch1, df_ch2 = acquire_with_auto_range(Q, channels=channels, parameters=parameters, segarb_options=segarb_options)
-        fname_base = build_fname_base(parameters=parameters, save_dir=save_dir)
-
-        data = analyze_pund_triangle_diff(df_ch1, df_ch2, channels=channels, parameters=parameters)
-        workbook_path = save_pund_workbook(f"{fname_base}.xlsx", df_ch1, df_ch2, data, channels=channels, inst=inst, parameters=parameters, segarb_options=segarb_options)
-
-        fig_i2, ax_i2 = plt.subplots(figsize=(7, 5))
-        for seg in ["P-U", "N-D"]:
-            sub = data["pund_diff"][data["pund_diff"]["Segment"] == seg]
-            ax_i2.plot(sub["Voltage"], sub["Polarization"], ".", label=seg, markersize=4)
-        ax_i2.set_xlabel("Voltage (V)")
-        ax_i2.set_ylabel("Polarization (uC/cm^2)")
-        ax_i2.set_title("PUND Polarization from I2 Difference")
-        ax_i2.legend()
-        ax_i2.grid(alpha=0.3)
-        fig_i2.tight_layout()
-        fig_i2.savefig(f"{fname_base}_loop_i2diff.png", dpi=300)
-        plt.close(fig_i2)
-
-        fig_i1, ax_i1 = plt.subplots(figsize=(7, 5))
-        for seg in ["P-U", "N-D"]:
-            sub = data["pund_diff"][data["pund_diff"]["Segment"] == seg]
-            ax_i1.plot(sub["Voltage"], sub["PolarizationI1"], ".", label=seg, markersize=4)
-        ax_i1.set_xlabel("Voltage (V)")
-        ax_i1.set_ylabel("Polarization (uC/cm^2)")
-        ax_i1.set_title("PUND Polarization from I1 Difference")
-        ax_i1.legend()
-        ax_i1.grid(alpha=0.3)
-        fig_i1.tight_layout()
-        fig_i1.savefig(f"{fname_base}_i1.png", dpi=300)
-        plt.close(fig_i1)
-
-        fig_iv, ax_iv = plt.subplots(figsize=(7, 5))
-        for seg in ["P-U", "N-D"]:
-            sub = data["pund_diff"][data["pund_diff"]["Segment"] == seg]
-            ax_iv.plot(sub["Voltage"], sub["DiffCurrent"], ".", label=f"{seg} I2", markersize=4)
-            ax_iv.plot(sub["Voltage"], sub["DiffCurrentI1"], ".", label=f"{seg} I1", markersize=3, alpha=0.7)
-        ax_iv.set_xlabel("Voltage (V)")
-        ax_iv.set_ylabel("Differential Current (A)")
-        ax_iv.set_title("PUND Differential I-V")
-        ax_iv.legend()
-        ax_iv.grid(alpha=0.3)
-        fig_iv.tight_layout()
-        fig_iv.savefig(f"{fname_base}_diff_iv.png", dpi=300)
-        plt.close(fig_iv)
-        print("PUND complete.")
-    result = {"output_path": workbook_path}
-    result.update(params=dict(parameters), accepted_current_ranges={key: parameters[key] for key in ("Irange1", "Irange2")})
+    plan = make_retention_plan(channels=channels, parameters=parameters)
+    validate_plan(plan, (ch1, ch2), parameters)
+    fname_base = build_fname_base(parameters=parameters, save_dir=save_dir)
+    raw_path = f"{fname_base}.xlsx"
+    frames, timing = {ch1: [], ch2: []}, []
+    try:
+        with PMUSession(inst, channels=(ch1, ch2)) as session:
+            df_ch1, df_ch2 = execute_plan(session.query, plan, (ch1, ch2), parameters,
+                                          segarb_options, frames, timing)
+    finally:
+        save_raw(raw_path, frames, timing, build_params_table(channels=channels, inst=inst, parameters=parameters, segarb_options=segarb_options))
+    data = analyze_pund_triangle_diff(df_ch1, df_ch2, channels=channels, parameters=parameters)
+    with pd.ExcelWriter(raw_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+        for label, frame in data.items():
+            if isinstance(frame, pd.DataFrame):
+                frame.to_excel(writer, sheet_name=label[:31], index=False)
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    for axis, key in zip(axes, ("PolarizationI1", "Polarization")):
+        for label in ("P-U", "N-D"):
+            frame = data["pund_diff"].query("Segment == @label")
+            axis.plot(frame["Voltage"], frame[key], label=label)
+        axis.set_title(key)
+    for axis in axes:
+        axis.set_xlabel("Voltage (V)")
+        axis.set_ylabel("Polarization (uC/cm^2)")
+        axis.legend()
+        axis.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(f"{fname_base}_loops.png", dpi=200)
+    plt.close(fig)
+    print(f"Saved retentionPUND: {raw_path}")
+    data["output_path"] = Path(raw_path)
+    result = data
+    result.update(params=dict(parameters), accepted_current_ranges={})
     result["settings"] = {"inst": inst, "channels": channels, "segarb_options": segarb_options}
     return result
 

@@ -117,7 +117,7 @@ class FeCapEntryWiringTests(unittest.TestCase):
                     keywords = {keyword.arg for keyword in call.keywords}
                     self.assertIn("options", keywords)
 
-                self.assertIn("SEGARB_OPTIONS.items()", source)
+                self.assertIn("segarb_options.items()", source.lower())
 
     def test_map_exposes_complete_params_and_propagates_common_options(self):
         path = WORKFLOW_ROOT / "pv2_pund_map.py"
@@ -126,8 +126,8 @@ class FeCapEntryWiringTests(unittest.TestCase):
         options = segarb_options_literal(tree)
         self.assertTrue(REQUIRED_OPTIONS.issubset(options))
         self.assertIn("effective_params = dict(base_params)", source)
-        self.assertIn("configure_measurement(", source)
-        self.assertIn("segarb_options=SEGARB_OPTIONS", source)
+        self.assertIn("module.run_test(", source)
+        self.assertIn("segarb_options=options", source)
         self.assertIn('"area_cm2": DEVICE_AREA_CM2', source)
 
 if __name__ == "__main__":

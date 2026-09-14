@@ -1,5 +1,9 @@
 # Keithley4200Measurement
 
+[English](#english) | [中文](#中文)
+
+## English
+
 Python measurement library and experiment collection for the Keithley
 4200A-SCS. The repository deliberately separates reusable instrument code,
 editable experiment recipes, multi-step workflows, and vendor references.
@@ -88,8 +92,63 @@ Explicit relative script paths are resolved from the current working directory;
 the default RV2 script is located relative to the source checkout. A packaged
 installation without the experiment files requires an explicit script path.
 
-## 中文使用导航
+## Usage navigation
 
+- [Measurement entries](measurements/README.md): choose a test and adjust device parameters.
+- [Workflows](workflows/README.md): batch sweeps and multi-step measurements.
+- [Shared source](src/README.md): package structure and tools.
+- [Parameter and mode reference](reference/manuals/PARAMETER_LIMITS.md): voltage/current ranges, SMU compliance, mode codes such as 0/1/2, and source page numbers.
+- [Tests](tests/README.md): offline verification instructions.
+
+Parameter comments explain usage; they do not replace verification of a device's safe operating range. The documentation work does not change experiment parameters.
+
+Parameter source: [manual limits and mode reference (Chinese)](reference/manuals/PARAMETER_LIMITS.md).
+
+## 中文
+
+### Keithley4200Measurement
+
+用于 Keithley 4200A-SCS 的 Python 测量库与实验脚本集合。公共仪器代码、可编辑实验、多步工作流及厂商参考资料分别存放。
+
+## 目录结构
+
+- src/keithley4200/pmu：PMU 命令、会话、数据处理和绘图。
+- src/keithley4200/smu：SMU System/User Mode 命令及 RPM 路由。
+- measurements/pmu：按器件和测试类型组织的 PMU 实验；入口见 [FET 指南](measurements/pmu/fet/README.md)。
+- measurements/smu：可编辑的 SMU 实验。
+- workflows：多测试组合与参数扫描。
+- src/keithley4200/tools：离线预览及 dry-run。
+- reference：官方示例和手册，不作为维护中的实验代码。
+- tests：使用模拟仪器响应的离线测试。
+
+实验文件可直接运行，会把仓库 src 加入导入路径。作为库使用时，在仓库根目录执行 python -m pip install -e .，再从 keithley4200 导入。实测入口可能连接仪器；单元测试与波形预览不连接仪器。
+
+## 保存结果
+
+文件名优先显示电压，再显示时间参数，例如 PV2_03.000000V_tr250us_td1000us_r001.xlsx；同次测量的图形沿用同一文件主名并加 _i1.png 等后缀。下一次同名测量使用 r002。
+
+- tr 为上升时间，td 为等待时间，tw 为平台或脉宽。时间用微秒表示，允许 0.1us 等小数；PV2/PUND 始终包含 delay。
+- 电压至少两位整数、固定六位小数，因此 100 V 以下正电压可按名称正确排序。负电压保留负号；负数和 100 V 以上数值需按数值排序。
+- 每次采集为整组表格与图形占用首个空闲 r001/r002 编号。即使表格不存在，已有配套图形也视为占用。包含参数的表格保留完整参数和 ISO 格式 saved_at，文件名不能替代参数记录。
+- .reservations/ 使用独占文件创建协调多个进程，应随数据目录保留。失败或中断可能有意留下空号。
+- 独立测试和工作流直接使用设置的目录，不再额外增加时间目录，已有测试/阶段目录保留。汇总名仍包含本轮时间，例如 map_summary_20260911_103449_r001.xlsx，配套 _live.csv 持续更新；time 列记录同一 ISO 时间。下一轮占用新编号，同秒运行也不覆盖。
+- 已有数据不重命名。底层保存/预览函数仍使用调用者给定的精确路径；自动命名在采集入口完成。
+
+公共命名在 src/keithley4200/output.py：调用 reserve_output_stem(directory, measurement_name(...)) 一次，整组输出共享返回的主名。
+
+## 离线模拟
+
+在仓库根目录运行：
+
+    python src/keithley4200/tools/dry_run.py --no-save measurements/pmu/fe_cap/PV2.py
+
+工具拦截通信，根据配置的 Segment Arb 或普通脉冲命令产生模拟数据。SARB 不测量的段仍累计时间；定点段返回一点，波形段返回 32 点。普通读取器继续解析这些响应，包括分块读取和脉冲 High/Low 字段。
+
+模拟用于检查软件流程，不模拟器件物理或真实采样率。平均采集模式和超过 65,536 模拟点的采集会明确报错。通信、sleep 和保存替换影响整个进程，应在独立进程运行。
+
+可编辑安装后也可使用 python -m keithley4200.tools.dry_run --no-save 加实验路径。预览从 keithley4200.tools.waveform_preview 导入。显式相对路径以当前工作目录为准；默认 RV2 路径相对源码仓库确定。只安装包、未包含实验文件时，必须提供实验文件路径。
+
+## 中文使用导航
 - [测量入口](measurements/README.md)：选测试、改器件参数。
 - [工作流](workflows/README.md)：批量扫描和多步测量。
 - [公共源码](src/README.md)：包结构及工具。

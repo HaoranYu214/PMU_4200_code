@@ -294,107 +294,69 @@ def main():
         "subsequent positive points follow a preceding negative write."
     )
 
-    original = {
-        "save_dir": dual.SAVE_DIR,
-        "read_delay": dual.PARAMS["read_delay"],
-        "read_gate_voltage": dual.PARAMS["read_gate_voltage"],
-        "read_drain_voltage": dual.PARAMS["read_drain_voltage"],
-        "READ_DELAY": dual.READ_DELAY,
-        "READ_GATE_V": dual.READ_GATE_V,
-        "READ_DRAIN_V": dual.READ_DRAIN_V,
-        "output_tag": dual.OUTPUT_TAG,
-        "positive_program_read_repeats": dual.PARAMS["positive_program_read_repeats"],
-        "negative_program_read_repeats": dual.PARAMS["negative_program_read_repeats"],
-    }
     rows = []
     repeated_rows = []
     run_index = 0
-    try:
-        for vg in VG_READ_VALUES:
-            for vd in VD_READ_VALUES:
-                bias_dir = output_dir / f"Vg{voltage_tag(vg)}_Vd{voltage_tag(vd)}"
-                dual.SAVE_DIR = bias_dir
-                dual.READ_GATE_V = float(vg)
-                dual.READ_DRAIN_V = float(vd)
-                dual.PARAMS["read_gate_voltage"] = float(vg)
-                dual.PARAMS["read_drain_voltage"] = float(vd)
-                for delay in DELAY_TIMES:
-                    run_index += 1
-                    delay = float(delay)
-                    dual.READ_DELAY = delay
-                    dual.PARAMS["read_delay"] = delay
-                    dual.OUTPUT_TAG = None  # The standard filename already includes td.
-                    print(
-                        f"\n=== Run {run_index}/{total_runs}: Vg={vg:g} V, "
-                        f"Vd={vd:g} V, delay={delay:g} s ==="
-                    )
-                    result_path = dual.main()
-                    if result_path is None:
-                        raise RuntimeError("The dual test did not return a result workbook.")
-                    frame = pd.read_excel(result_path, sheet_name="FET_Data")
-                    frame.insert(0, "Vg_read_V", float(vg))
-                    frame.insert(1, "Vd_read_V", float(vd))
-                    frame.insert(2, "RequestedDelay_s", delay)
-                    frame.insert(3, "SweepRunIndex", run_index)
-                    frame["SourceWorkbook"] = Path(result_path).name
-                    rows.append(frame)
-
-                # Additional repeated FeFET-like data set for this Vg/Vd pair.
-                dual.PARAMS["positive_program_read_repeats"] = int(FEFET_REPEAT_N)
-                dual.PARAMS["negative_program_read_repeats"] = int(FEFET_REPEAT_N)
-                dual.READ_DELAY = float(FEFET_REPEAT_T)
-                dual.PARAMS["read_delay"] = float(FEFET_REPEAT_T)
-                dual.OUTPUT_TAG = (
-                    f"repeated_N{int(FEFET_REPEAT_N)}_t{float(FEFET_REPEAT_T):g}s"
-                )
-                dual.SAVE_DIR = bias_dir / (
-                    f"repeated_FeFET_N{int(FEFET_REPEAT_N)}_t{float(FEFET_REPEAT_T):g}s"
-                )
+    for vg in VG_READ_VALUES:
+        for vd in VD_READ_VALUES:
+            bias_dir = output_dir / f"Vg{voltage_tag(vg)}_Vd{voltage_tag(vd)}"
+            for delay in DELAY_TIMES:
+                run_index += 1
+                delay = float(delay)
                 print(
-                    f"\n=== Extra repeated FeFET: Vg={vg:g} V, Vd={vd:g} V, "
-                    f"N={int(FEFET_REPEAT_N)}, t={float(FEFET_REPEAT_T):g} s ==="
+                    f"\n=== Run {run_index}/{total_runs}: Vg={vg:g} V, "
+                    f"Vd={vd:g} V, delay={delay:g} s ==="
                 )
-                repeated_path = dual.main()
-                if repeated_path is None:
-                    raise RuntimeError("The repeated FeFET test did not return a workbook.")
-                repeated = pd.read_excel(repeated_path, sheet_name="FET_Data")
-                repeated.insert(0, "Vg_read_V", float(vg))
-                repeated.insert(1, "Vd_read_V", float(vd))
-                repeated.insert(2, "RepeatDelay_t_s", float(FEFET_REPEAT_T))
-                repeated["SourceWorkbook"] = Path(repeated_path).name
-                repeated_rows.append(repeated)
-                repeat_plot = Path(repeated_path).parent / "Ids_vs_repeat.png"
-                try:
-                    save_repeated_fefet_plot(repeated, repeat_plot, float(vg), float(vd))
-                except Exception as exc:
-                    print(
-                        "Warning: repeated FeFET plot could not be saved; "
-                        f"measurement workbook is safe: {exc}"
-                    )
+                result_path = dual.run_test(
+                    params_override={"read_gate_voltage": float(vg),
+                                     "read_drain_voltage": float(vd),
+                                     "read_delay": delay},
+                    save_dir=bias_dir, output_tag=None, preview_only=False,
+                )["output_path"]
+                if result_path is None:
+                    raise RuntimeError("The dual test did not return a result workbook.")
+                frame = pd.read_excel(result_path, sheet_name="FET_Data")
+                frame.insert(0, "Vg_read_V", float(vg))
+                frame.insert(1, "Vd_read_V", float(vd))
+                frame.insert(2, "RequestedDelay_s", delay)
+                frame.insert(3, "SweepRunIndex", run_index)
+                frame["SourceWorkbook"] = Path(result_path).name
+                rows.append(frame)
 
-                # Restore the base test repeat counts before the
-                # next Vg/Vd pair begins.
-                dual.PARAMS["positive_program_read_repeats"] = original[
-                    "positive_program_read_repeats"
-                ]
-                dual.PARAMS["negative_program_read_repeats"] = original[
-                    "negative_program_read_repeats"
-                ]
-    finally:
-        dual.SAVE_DIR = original["save_dir"]
-        dual.READ_DELAY = original["READ_DELAY"]
-        dual.READ_GATE_V = original["READ_GATE_V"]
-        dual.READ_DRAIN_V = original["READ_DRAIN_V"]
-        dual.PARAMS["read_delay"] = original["read_delay"]
-        dual.PARAMS["read_gate_voltage"] = original["read_gate_voltage"]
-        dual.PARAMS["read_drain_voltage"] = original["read_drain_voltage"]
-        dual.OUTPUT_TAG = original["output_tag"]
-        dual.PARAMS["positive_program_read_repeats"] = original[
-            "positive_program_read_repeats"
-        ]
-        dual.PARAMS["negative_program_read_repeats"] = original[
-            "negative_program_read_repeats"
-        ]
+            # Additional repeated FeFET-like data set for this Vg/Vd pair.
+            repeat_tag = f"repeated_N{int(FEFET_REPEAT_N)}_t{float(FEFET_REPEAT_T):g}s"
+            repeat_dir = bias_dir / (
+                f"repeated_FeFET_N{int(FEFET_REPEAT_N)}_t{float(FEFET_REPEAT_T):g}s"
+            )
+            print(
+                f"\n=== Extra repeated FeFET: Vg={vg:g} V, Vd={vd:g} V, "
+                f"N={int(FEFET_REPEAT_N)}, t={float(FEFET_REPEAT_T):g} s ==="
+            )
+            repeated_path = dual.run_test(
+                params_override={"read_gate_voltage": float(vg),
+                                 "read_drain_voltage": float(vd),
+                                 "read_delay": float(FEFET_REPEAT_T),
+                                 "positive_program_read_repeats": int(FEFET_REPEAT_N),
+                                 "negative_program_read_repeats": int(FEFET_REPEAT_N)},
+                output_tag=repeat_tag, save_dir=repeat_dir, preview_only=False,
+            )["output_path"]
+            if repeated_path is None:
+                raise RuntimeError("The repeated FeFET test did not return a workbook.")
+            repeated = pd.read_excel(repeated_path, sheet_name="FET_Data")
+            repeated.insert(0, "Vg_read_V", float(vg))
+            repeated.insert(1, "Vd_read_V", float(vd))
+            repeated.insert(2, "RepeatDelay_t_s", float(FEFET_REPEAT_T))
+            repeated["SourceWorkbook"] = Path(repeated_path).name
+            repeated_rows.append(repeated)
+            repeat_plot = Path(repeated_path).parent / "Ids_vs_repeat.png"
+            try:
+                save_repeated_fefet_plot(repeated, repeat_plot, float(vg), float(vd))
+            except Exception as exc:
+                print(
+                    "Warning: repeated FeFET plot could not be saved; "
+                    f"measurement workbook is safe: {exc}"
+                )
+
 
     raw_data = pd.concat(rows, ignore_index=True)
     metrics = calculate_metrics(raw_data)

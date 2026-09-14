@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # PMU data-processing helpers.
 """
-数据处理模块 - 数据读取、保存、合并、计算
+PMU buffer reading, saving, channel merging, and analysis.
 """
 
 import numpy as np
@@ -35,9 +35,9 @@ def _channel_data_columns(ch, field_count, pulse_iv=None):
 
 
 def read_channel_data(Q, ch, block=2048, debug=False, pulse_iv=None):
-    """按块读取单通道，返回 [Voltage ch, Current ch, Timestamp ch, Status ch]；无数据返回 None。
+    """Read channel buffers in blocks; return voltage/current/time/status or None.
     
-    debug=True 时打印原始响应的前几个数据点，用于检查精度问题。
+    debug=True prints raw response samples for investigating parsing precision.
     """
     # DATA:GET allows 2048 points per block (7-7): V/I/time/status, or eight fields for High+Low.
     # Keep raw Status codes; they are neither Boolean flags nor TEST_MODE values.
@@ -61,11 +61,11 @@ def read_channel_data(Q, ch, block=2048, debug=False, pulse_iv=None):
         if not resp:
             continue
         
-        # Debug: 打印第一块的原始响应
+        # Show the first raw response block when debugging.
         if debug and start == 0:
             print(f"🔍 [DEBUG] CH{ch} 原始响应长度: {len(resp)}")
             print(f"🔍 [DEBUG] CH{ch} 前500字符:\n{resp[:500]}")
-            # 解析第一个数据点看看
+            # Inspect the first record before numeric conversion.
             first_row = resp.split(";")[0] if ";" in resp else resp
             print(f"🔍 [DEBUG] CH{ch} 第一个数据点原始: '{first_row}'")
         
@@ -105,7 +105,7 @@ def read_channel_data(Q, ch, block=2048, debug=False, pulse_iv=None):
 
 
 def read_both_channels(Q, ch1, ch2, debug=False, pulse_iv=None):
-    """读取双通道数据（若某通道无数据返回 None）"""
+    """Read both channels; a channel with no data returns None."""
     df1 = read_channel_data(Q, ch1, debug=debug, pulse_iv=pulse_iv)
     df2 = read_channel_data(Q, ch2, debug=debug, pulse_iv=pulse_iv)
     return df1, df2
@@ -149,7 +149,7 @@ def select_pulse_iv_level(df, ch, level="High"):
 
 
 def merge_channels(dfs: dict):
-    """dfs={1:df1或None, 2:df2或None} → 横向拼列；长度不同自动补NaN。"""
+    """Join channels 1/2 by row index; pad unequal lengths with NaN."""
     d1, d2 = dfs.get(1), dfs.get(2)
     if d1 is None and d2 is None:
         return pd.DataFrame()
@@ -161,7 +161,7 @@ def merge_channels(dfs: dict):
 
 
 def add_resistance_columns(df, eps=1e-12, res_min=1.0, res_max=1e15):
-    """在 df 内联添加 'Resistance 1/2'（如对应V/I存在）。"""
+    """Add Resistance 1/2 in place where matching voltage/current columns exist."""
     if df is None or df.empty:
         return df
     for ch in (1, 2):
@@ -176,7 +176,7 @@ def add_resistance_columns(df, eps=1e-12, res_min=1.0, res_max=1e15):
 
 
 def calculate_polarization(current_data, time_data, area_cm2):
-    """计算极化值，返回单位 μC/cm²"""
+    """Integrate current and center polarization; area is in cm^2, output in uC/cm^2."""
     charge = np.zeros_like(current_data, dtype=float)
     for i in range(1, len(current_data)):
         dt = time_data[i] - time_data[i-1]
@@ -189,8 +189,11 @@ def calculate_polarization(current_data, time_data, area_cm2):
 
 def analyze_pund_diff(df_ch1, df_ch2, params):
     """
-    PUND差分分析。
-    返回: dict(df_total, pund_diff, meta)
+    Analyze the legacy endurance PUND layout: 22 equally sampled segments.
+
+    Returns df_total, pund_diff, and meta. Do not use this index-based helper
+    for arbitrary segment lengths or selectively unmeasured segments. The
+    standalone PUND entries own their separate waveform-specific analysis.
     """
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
         raise ValueError("PUND原始数据为空")
@@ -250,11 +253,10 @@ def analyze_pund_diff(df_ch1, df_ch2, params):
 
 def analyze_nis_switch(df_ch1, df_ch2, params):
     """
-    NIS Switch 数据分析 - 简化版
-    
-    直接返回原始数据，由调用方（1C_NISswitch.py）根据 MeasureSquare 决定如何处理。
-    
-    返回: dict(df_ch1, df_ch2, meta)
+    Return NLS channel frames and MeasureSquare metadata without processing.
+
+    The measurement entry owns waveform-specific analysis. The legacy
+    function name is retained for existing callers.
     """
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
         raise ValueError("NIS Switch 原始数据为空")
@@ -272,10 +274,12 @@ def analyze_nis_switch(df_ch1, df_ch2, params):
     }
 
 
-# === 保存功能 ===
+# === Saving ===
 
 def save_channels_separate_excel(dfs: dict, path, *, parameters=None):
-    """将双通道数据保存到Excel的不同sheet中"""
+    """Save channels to separate Excel sheets with the supplied parameter snapshot.
+
+    Returns a success flag; callers must check it if saving is required."""
     if not dfs or all(df is None or df.empty for df in dfs.values()):
         print(f"⚠️ 无数据，跳过保存：{path}")
         return False
@@ -310,7 +314,9 @@ def save_channels_separate_excel(dfs: dict, path, *, parameters=None):
 
 
 def save_csv(df, path, sep=None, for_excel=True):
-    """保存 DataFrame 到 CSV；在小数点为','的地区默认用';'分隔，适配 Excel。"""
+    """Save a DataFrame as CSV; use ';' in decimal-comma locales for Excel.
+
+    Returns False on empty input or a save error; does not raise save errors."""
     if df is None or df.empty:
         print(f"⚠️ 无数据，跳过保存：{path}")
         return False
@@ -342,7 +348,7 @@ def save_csv(df, path, sep=None, for_excel=True):
 
 
 def save_excel(df, path):
-    """保存单个 DataFrame 到 Excel"""
+    """Save one DataFrame to Excel; return False on empty input or a save error."""
     if df is None or df.empty:
         print(f"⚠️ 无数据，跳过保存：{path}")
         return False
@@ -358,7 +364,7 @@ def save_excel(df, path):
 
 
 def print_data_summary(df):
-    """打印数据摘要信息"""
+    """Print a summary of available channel data."""
     if df is not None and not df.empty:
         print("\n📊 数据摘要：")
         print("  形状   :", df.shape)
@@ -373,10 +379,10 @@ def print_data_summary(df):
         print("⚠️ 无有效数据")
 
 
-# === 模拟数据生成 ===
+# === Synthetic data ===
 
 def generate_mock_dual(n_points=2000, duration=1e-3):
-    """生成模拟双通道数据"""
+    """Generate synthetic two-channel data for offline examples."""
     def triangle_wave(t, cycles=4, duration=1e-3, amp=5.0):
         phase = (cycles * t / duration) % 1.0
         tri01 = 2.0*np.abs(phase - 0.5)

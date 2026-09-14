@@ -23,6 +23,7 @@ from measurements.pmu.programmed.NLS_1C_switch import (
 )
 from keithley4200.output import prepare_output_dir, reserve_summary_stem
 from keithley4200.pmu.session import PMUSession
+from keithley4200.pmu.timing import nls_padding_time
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
@@ -40,6 +41,7 @@ BASE_PARAMS = dict(
     Rt_p=2.5e-4,
     Delaytime=5e-4,
     Rt_s=1e-7,
+    TotalDelay=0.11,
     Dwell=1e-6,
     Irange1=1e-5,
     Irange2=1e-5,
@@ -67,6 +69,8 @@ def preview_sweep_waveform(output_path=None):
 
 def run_sweep():
     """Run a Dwell x Vsquare sweep and save a summary workbook."""
+    for dwell in Dwell_list:
+        nls_padding_time({**BASE_PARAMS, "Dwell": float(dwell)})
     output_dir = prepare_output_dir(SAVE_DIR)
     summary_stem, run_time = reserve_summary_stem(output_dir, "NLS_summary")
     results = []
@@ -106,6 +110,8 @@ def run_sweep():
                             {
                                 "Vsquare": vsquare,
                                 "Dwell": dwell,
+                                "TotalDelay": params["TotalDelay"],
+                                "PaddingDelay": nls_padding_time(params),
                                 "Pr": pr_value,
                                 "ENABLE_LOAD_CONFIG": SEGARB_OPTIONS["ENABLE_LOAD_CONFIG"],
                                 "LOAD_RESISTANCE": SEGARB_OPTIONS["LOAD_RESISTANCE"],
@@ -120,6 +126,8 @@ def run_sweep():
                             {
                                 "Vsquare": vsquare,
                                 "Dwell": dwell,
+                                "TotalDelay": params["TotalDelay"],
+                                "PaddingDelay": nls_padding_time(params),
                                 "Pr": None,
                                 "ENABLE_LOAD_CONFIG": SEGARB_OPTIONS["ENABLE_LOAD_CONFIG"],
                                 "LOAD_RESISTANCE": SEGARB_OPTIONS["LOAD_RESISTANCE"],

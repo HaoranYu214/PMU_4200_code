@@ -1,5 +1,9 @@
 # SMU I-V experiments
 
+[English](#english) | [中文](#中文)
+
+## English
+
 Scripts in this folder keep experiment parameters near the top while reusing
 connection, command, execution, and data helpers from
 `src/keithley4200/smu` alongside the PMU library in
@@ -36,8 +40,35 @@ processed current density is `J = I / DEVICE_AREA_CM2` in A/cm². Default PNGs
 plot J-V and log(abs(J))-V. Major log tick labels display physical values such
 as `1e-2` and `1e-1` A/cm² rather than their numerical log10 exponents.
 
-## Memristor 分段扫描
+## Segmented memristor sweep
 
+[segmented_voltage_sweep_Memristor.py](segmented_voltage_sweep_Memristor.py) changes the positive peak between cycles while using a fixed negative peak. POSITIVE_PEAK_STEP controls the change between peaks; SEGMENT_STEP controls sampling steps within each segment. The fully expanded list is limited to 4096 points per execution.
+
+Parameter source: [manual limits and mode reference (Chinese)](../../../reference/manuals/PARAMETER_LIMITS.md).
+
+## 中文
+
+### SMU I-V 实验
+
+脚本顶部保留实验参数，复用 src/keithley4200/smu 的连接、命令、执行和数据辅助，与 PMU 库并列。
+
+- linear_voltage_sweep.py：System Mode 双通道线性电压扫描。
+- segmented_voltage_sweep.py：任意转折点路径，例如 0 → V1 → 0 → V2 → 0。
+- user_mode_spot.py：User Mode 电压源、电流单点测量。
+
+System Mode 的 AVAILABLE_CHANNELS 必须列出 KCon 中全部已安装和映射的 SMU，库先关闭这些通道，再定义活动扫描/偏置通道。保存前确认缓冲非空、长度一致并等于设定点数。
+
+SMU_CONNECTIONS 描述实际接线：direct 为直接连接探针；rpm:PMUN-C 为经过指定 PMU 通道的 RPM。当前系统 SMU1/2 经 PMU1-1/2，SMU3/4 直连。
+
+工作簿固定包含：
+
+1. Raw：设定电压、全部测量缓冲及原始 KXCI 状态。
+2. PlotData：CommandedVoltage，然后 V1、I1、J1_A_per_cm2、AbsI1、AbsJ1_A_per_cm2，随后为通道 2 对应列；不含状态，供绘图/提取。
+3. Parameters：完整实验配置。
+
+DEVICE_AREA_CM2 为器件面积。原始电流单位 A，电流密度 J=I/DEVICE_AREA_CM2，单位 A/cm²。默认 PNG 绘制 J-V 和 log(abs(J))-V；对数刻度显示实际 1e-2、1e-1 A/cm² 等值，不是 log10 指数。
+
+## Memristor 分段扫描
 [segmented_voltage_sweep_Memristor.py](segmented_voltage_sweep_Memristor.py) 逐次改变正峰值，配合固定负峰值。POSITIVE_PEAK_STEP 决定峰值之间的变化，SEGMENT_STEP 决定每段内的采样步长。最终展开列表每次最多 4096 点。
 
 参数依据：[手册限制与模式速查](../../../reference/manuals/PARAMETER_LIMITS.md)。

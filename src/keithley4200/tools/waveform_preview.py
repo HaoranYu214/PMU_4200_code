@@ -13,6 +13,21 @@ MEASURE_MODE_LABELS = {
 }
 
 
+def _ssr_preview_config(config):
+    """Mask isolated output voltage; a floating DUT voltage is unspecified."""
+    if len(config) < 8 or config[7] is None:
+        return config
+    from keithley4200.pmu.pmu_tests import normalize_ssr, _normalize_seg_arb_measurements
+    states = normalize_ssr(config[3], config[7])
+    result = list(config)
+    result[1] = [v if state else float("nan") for v, state in zip(config[1], states)]
+    result[2] = [v if state else float("nan") for v, state in zip(config[2], states)]
+    modes, starts, stops = _normalize_seg_arb_measurements(config[3], *config[4:7])
+    result[4] = [mode if state else 0 for mode, state in zip(modes, states)]
+    result[5], result[6] = starts, stops
+    return tuple(result)
+
+
 def _voltage_at(start_v, stop_v, segment_time, offset_time):
     """Linearly interpolate voltage inside one Segment Arb segment."""
     if segment_time <= 0:
@@ -33,10 +48,11 @@ def sequence_configs_to_dataframe(
 
     columns = {}
     for index, config in enumerate(configs):
+        config = _ssr_preview_config(config)
         _seq_id, start_v, stop_v, times = config[:4]
         meas_types = config[4] if len(config) > 4 else [2] * len(times)
         segments = list(zip(start_v, stop_v, times, meas_types))
-        x, y, actual_t = [], [], []
+        x, y, actual_t, relay_states = [], [], [], []
         display_time = 0.0
         real_time = 0.0
         segment_index = 0
@@ -66,6 +82,8 @@ def sequence_configs_to_dataframe(
             else:
                 display_duration = actual_duration
 
+            if len(config) > 7 and config[7] is not None:
+                relay_states.extend([config[7][segment_index]] * 2)
             x.extend([display_time, display_time + display_duration])
             y.extend([sv, ev])
             actual_t.extend([real_time, real_time + actual_duration])
@@ -80,6 +98,8 @@ def sequence_configs_to_dataframe(
         ).replace(" ", "_")
         columns[f"T_{label}"] = pd.Series(x, dtype=float)
         columns[f"V_{label}"] = pd.Series(y, dtype=float)
+        if relay_states:
+            columns[f"SSR_{label}"] = pd.Series(relay_states, dtype=int)
         if compress_constant_segments_above is not None:
             columns[f"ActualT_{label}"] = pd.Series(actual_t, dtype=float)
     return pd.DataFrame(columns)
@@ -87,6 +107,7 @@ def sequence_configs_to_dataframe(
 
 def _measurement_times(config, compress_above=None, compressed_width=2e-4):
     """Return display and actual midpoint times for measured segments."""
+    config = _ssr_preview_config(config)
     start_v, stop_v, times = config[1], config[2], config[3]
     meas_types = config[4] if len(config) > 4 else [2] * len(times)
     meas_start = config[5] if len(config) > 5 else [0.0] * len(times)
@@ -250,6 +271,7 @@ def preview_sequence_configs(
         4: ("tab:green", "waveform average"),
     }
     for index, (ax, config) in enumerate(zip(axes, configs)):
+        config = _ssr_preview_config(config)
         seq_id, start_v, stop_v, times = config[:4]
         meas_types = config[4] if len(config) > 4 else [2] * len(times)
         meas_start = config[5] if len(config) > 5 else [0.0] * len(times)
@@ -295,7 +317,12 @@ def preview_sequence_configs(
                 segment_index += 1
 
         delay_annotations = []
+        floating_labeled = False
         for sv, ev, dt, mt, ms, me, display_dt in display_segments:
+            if sv != sv:
+                ax.axvspan(t, t+display_dt, color="gray", alpha=0.2,
+                           label="SSR open: floating output" if not floating_labeled else None)
+                floating_labeled = True
             x.extend([t, t + display_dt])
             y.extend([sv, ev])
             if display_dt != dt:

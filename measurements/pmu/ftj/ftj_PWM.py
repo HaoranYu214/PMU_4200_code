@@ -37,6 +37,7 @@ from keithley4200.pmu.pmu_tests import (
     validate_segment_arb_configs,
 )
 from keithley4200.pmu.session import PMUSession
+from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
 
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
@@ -72,54 +73,8 @@ params = {
 }
 
 
-def _sync_parameter_aliases():
-    global BASE_V, WRITE_POSITIVE_V, WRITE_NEGATIVE_V, READ_V
-    global WRITE_BASE_DWELL, WIDTH_MULTIPLIERS, WRITE_WIDTHS
-    global PWM_REPEAT_COUNT, READ_DWELL
-    global WRITE_POSITIVE_TRF, WRITE_NEGATIVE_TRF, READ_TRF
-    global WRITE_POSITIVE_IDLE, WRITE_NEGATIVE_IDLE, READ_IDLE
-
-    BASE_V = float(params["base_v"])
-    WRITE_POSITIVE_V = float(params["write_positive_v"])
-    WRITE_NEGATIVE_V = float(params["write_negative_v"])
-    READ_V = float(params["read_v"])
-    WRITE_BASE_DWELL = float(params["write_base_dwell"])
-    WIDTH_MULTIPLIERS = list(params["width_multipliers"])
-    WRITE_WIDTHS = [WRITE_BASE_DWELL * float(value) for value in WIDTH_MULTIPLIERS]
-    PWM_REPEAT_COUNT = int(params["repeat_count"])
-    READ_DWELL = float(params["read_dwell"])
-    WRITE_POSITIVE_TRF = float(params["write_positive_trf"])
-    WRITE_NEGATIVE_TRF = float(params["write_negative_trf"])
-    READ_TRF = float(params["read_trf"])
-    WRITE_POSITIVE_IDLE = float(params["write_positive_idle"])
-    WRITE_NEGATIVE_IDLE = float(params["write_negative_idle"])
-    READ_IDLE = float(params["read_idle"])
-
-
-_sync_parameter_aliases()
-
-FULL_PWM_SEQ_ID = 1
-MAX_SEGMENTS_PER_SEQ = MAX_SEGMENTS_PER_SEQUENCE
-
 PREVIEW_ONLY = False
 SAVE_WAVEFORM_PREVIEW = False
-
-meas_types_write = [0, 0, 0, 0]
-meas_start_write = [0.0, 0.0, 0.0, 0.0]
-meas_stop_write = [0.0, 0.0, 0.0, 0.0]
-
-meas_types_read = [0, 1, 0, 0]
-meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-
-def build_pulse_block(level, trf, dwell, idle):
-    """Return a 4-segment base -> absolute target -> base pulse block."""
-    start_v = [BASE_V, level, level, BASE_V]
-    stop_v = [level, level, BASE_V, BASE_V]
-    time_values = [trf, dwell, trf, idle]
-    return start_v, stop_v, time_values
-
 
 def append_block(target, start_v, stop_v, time_values, meas_types, meas_start, meas_stop):
     target["start_v"].extend(start_v)
@@ -128,7 +83,6 @@ def append_block(target, start_v, stop_v, time_values, meas_types, meas_start, m
     target["meas_types"].extend(meas_types)
     target["meas_start"].extend(meas_start)
     target["meas_stop"].extend(meas_stop)
-
 
 def make_empty_sequence_accumulator():
     return {
@@ -140,20 +94,162 @@ def make_empty_sequence_accumulator():
         "meas_stop": [],
     }
 
+def expand_config_for_preview(config, repeat_count, *, seq_id=0):
+    """Return a repeated copy for preview/export-only waveform tracing."""
+    start_v = []
+    stop_v = []
+    time_values = []
+    meas_types = []
+    meas_start = []
+    meas_stop = []
 
-def make_pwm_sequence(seq_id):
+    for _ in range(repeat_count):
+        start_v.extend(config[1])
+        stop_v.extend(config[2])
+        time_values.extend(config[3])
+        meas_types.extend(config[4])
+        meas_start.extend(config[5])
+        meas_stop.extend(config[6])
+
+    return (seq_id, start_v, stop_v, time_values, meas_types, meas_start, meas_stop)
+
+def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, add_gap=True):
+    """Append t-V endpoint pairs for one waveform block."""
+    cursor = start_time
+    for segment_start_v, segment_stop_v, segment_time in zip(start_v, stop_v, time_values):
+        next_cursor = cursor + segment_time
+        points.append((cursor, segment_start_v))
+        points.append((next_cursor, segment_stop_v))
+        cursor = next_cursor
+    if add_gap:
+        points.append((None, None))
+    return cursor
+
+
+def build_waveform(*, parameters=None, channels=None):
+    """Build pulse arrays and execution metadata from this run's parameters."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    base_v = float(parameters["base_v"])
+    write_positive_v = float(parameters["write_positive_v"])
+    write_negative_v = float(parameters["write_negative_v"])
+    read_v = float(parameters["read_v"])
+    write_base_dwell = float(parameters["write_base_dwell"])
+    width_multipliers = list(parameters["width_multipliers"])
+    write_widths = [write_base_dwell * float(value) for value in width_multipliers]
+    pwm_repeat_count = int(parameters["repeat_count"])
+    read_dwell = float(parameters["read_dwell"])
+    write_positive_trf = float(parameters["write_positive_trf"])
+    write_negative_trf = float(parameters["write_negative_trf"])
+    read_trf = float(parameters["read_trf"])
+    write_positive_idle = float(parameters["write_positive_idle"])
+    write_negative_idle = float(parameters["write_negative_idle"])
+    read_idle = float(parameters["read_idle"])
+    meas_start_read = [0.0, read_dwell * 0.5, 0.0, 0.0]
+    meas_stop_read = [0.0, read_dwell * 0.9, 0.0, 0.0]
+    full_pwm_seq_id = 1
+    meas_start_write = [0.0, 0.0, 0.0, 0.0]
+    meas_stop_write = [0.0, 0.0, 0.0, 0.0]
+    meas_types_read = [0, 1, 0, 0]
+    meas_types_write = [0, 0, 0, 0]
+    ch1_full_pwm_config, ch2_full_pwm_config, pwm_single_run_steps = make_pwm_sequence(
+        full_pwm_seq_id,
+        base_v=base_v,
+        meas_start_read=meas_start_read,
+        meas_start_write=meas_start_write,
+        meas_stop_read=meas_stop_read,
+        meas_stop_write=meas_stop_write,
+        meas_types_read=meas_types_read,
+        meas_types_write=meas_types_write,
+        read_dwell=read_dwell,
+        read_idle=read_idle,
+        read_trf=read_trf,
+        read_v=read_v,
+        write_base_dwell=write_base_dwell,
+        write_negative_idle=write_negative_idle,
+        write_negative_trf=write_negative_trf,
+        write_negative_v=write_negative_v,
+        write_positive_idle=write_positive_idle,
+        write_positive_trf=write_positive_trf,
+        write_positive_v=write_positive_v,
+        write_widths=write_widths,
+    )
+    pwm_steps = [
+        {"RepeatIndex": repeat_index, **step}
+        for repeat_index in range(1, pwm_repeat_count + 1)
+        for step in pwm_single_run_steps
+    ]
+    seq_configs = {ch1: [ch1_full_pwm_config], ch2: [ch2_full_pwm_config]}
+    seq_list = {
+        ch1: [(full_pwm_seq_id, pwm_repeat_count)],
+        ch2: [(full_pwm_seq_id, pwm_repeat_count)],
+    }
+    validate_segment_arb_configs(seq_configs)
+    max_segments_per_seq = MAX_SEGMENTS_PER_SEQUENCE
+    return {
+        'base_v': base_v,
+        'max_segments_per_seq': max_segments_per_seq,
+        'pwm_repeat_count': pwm_repeat_count,
+        'pwm_steps': pwm_steps,
+        'read_dwell': read_dwell,
+        'read_idle': read_idle,
+        'read_trf': read_trf,
+        'read_v': read_v,
+        'seq_list': seq_list,
+        'write_negative_idle': write_negative_idle,
+        'write_negative_trf': write_negative_trf,
+        'write_positive_idle': write_positive_idle,
+        'write_positive_trf': write_positive_trf,
+        'ch1_full_pwm_config': ch1_full_pwm_config,
+        'seq_configs': seq_configs,
+    }
+
+
+def build_pulse_block(level, trf, dwell, idle, *, base_v):
+    """Return a 4-segment base -> absolute target -> base pulse block."""
+    start_v = [base_v, level, level, base_v]
+    stop_v = [level, level, base_v, base_v]
+    time_values = [trf, dwell, trf, idle]
+    return start_v, stop_v, time_values
+
+
+def make_pwm_sequence(
+    seq_id,
+    *,
+    base_v,
+    meas_start_read,
+    meas_start_write,
+    meas_stop_read,
+    meas_stop_write,
+    meas_types_read,
+    meas_types_write,
+    read_dwell,
+    read_idle,
+    read_trf,
+    read_v,
+    write_base_dwell,
+    write_negative_idle,
+    write_negative_trf,
+    write_negative_v,
+    write_positive_idle,
+    write_positive_trf,
+    write_positive_v,
+    write_widths,
+):
     """Build one sequence: positive width sweep, then negative width sweep."""
     ch1 = make_empty_sequence_accumulator()
     ch2 = make_empty_sequence_accumulator()
     steps = []
 
     for polarity, write_voltage, trf, idle in (
-        ("positive", WRITE_POSITIVE_V, WRITE_POSITIVE_TRF, WRITE_POSITIVE_IDLE),
-        ("negative", WRITE_NEGATIVE_V, WRITE_NEGATIVE_TRF, WRITE_NEGATIVE_IDLE),
+        ("positive", write_positive_v, write_positive_trf, write_positive_idle),
+        ("negative", write_negative_v, write_negative_trf, write_negative_idle),
     ):
-        for width in WRITE_WIDTHS:
-            write_start_v, write_stop_v, write_times = build_pulse_block(write_voltage, trf, width, idle)
-            read_start_v, read_stop_v, read_times = build_pulse_block(READ_V, READ_TRF, READ_DWELL, READ_IDLE)
+        for width in write_widths:
+            write_start_v, write_stop_v, write_times = build_pulse_block(write_voltage, trf, width, idle, base_v=base_v)
+            read_start_v, read_stop_v, read_times = build_pulse_block(read_v, read_trf, read_dwell, read_idle, base_v=base_v)
 
             append_block(ch1, write_start_v, write_stop_v, write_times, meas_types_write, meas_start_write, meas_stop_write)
             append_block(ch1, read_start_v, read_stop_v, read_times, meas_types_read, meas_start_read, meas_stop_read)
@@ -168,7 +264,7 @@ def make_pwm_sequence(seq_id):
                     "Polarity": polarity,
                     "WriteVoltage": write_voltage,
                     "WriteWidth_s": width,
-                    "WidthMultiplier": width / WRITE_BASE_DWELL,
+                    "WidthMultiplier": width / write_base_dwell,
                 }
             )
 
@@ -193,36 +289,20 @@ def make_pwm_sequence(seq_id):
     return ch1_config, ch2_config, steps
 
 
-def _rebuild_runtime_config():
-    global meas_start_read, meas_stop_read
-    global ch1_full_pwm_config, ch2_full_pwm_config, PWM_SINGLE_RUN_STEPS
-    global PWM_STEPS, seq_configs, SEQ_LIST, CURRENT_RANGES
-
-    _sync_parameter_aliases()
-    meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-    meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-    ch1_full_pwm_config, ch2_full_pwm_config, PWM_SINGLE_RUN_STEPS = make_pwm_sequence(
-        FULL_PWM_SEQ_ID
-    )
-    PWM_STEPS = [
-        {"RepeatIndex": repeat_index, **step}
-        for repeat_index in range(1, PWM_REPEAT_COUNT + 1)
-        for step in PWM_SINGLE_RUN_STEPS
-    ]
-    seq_configs = {CH1: [ch1_full_pwm_config], CH2: [ch2_full_pwm_config]}
-    SEQ_LIST = {
-        CH1: [(FULL_PWM_SEQ_ID, PWM_REPEAT_COUNT)],
-        CH2: [(FULL_PWM_SEQ_ID, PWM_REPEAT_COUNT)],
-    }
-    CURRENT_RANGES = {
-        CH1: float(CURRENT_RANGES.get(CH1, next(iter(CURRENT_RANGES.values())))),
-        CH2: float(CURRENT_RANGES.get(CH2, next(iter(CURRENT_RANGES.values())))),
-    }
-    validate_segment_arb_configs(seq_configs)
-
-
-def validate_sequence_configs(configs_by_channel, seq_list_by_channel):
+def validate_sequence_configs(
+    configs_by_channel,
+    seq_list_by_channel,
+    *,
+    channels=None,
+    parameters=None,
+    waveform=None,
+):
     """Catch common parameter edit mistakes before sending configs to the PMU."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
     for channel, configs in configs_by_channel.items():
         config_by_id = {config[0]: config for config in configs}
         for config in configs:
@@ -237,10 +317,10 @@ def validate_sequence_configs(configs_by_channel, seq_list_by_channel):
             }
             if len(lengths) != 1:
                 raise ValueError(f"CH{channel} seq {seq_id} has mismatched segment array lengths.")
-            if len(times) > MAX_SEGMENTS_PER_SEQ:
+            if len(times) > waveform['max_segments_per_seq']:
                 raise ValueError(
                     f"CH{channel} seq {seq_id} has {len(times)} segments, "
-                    f"above MAX_SEGMENTS_PER_SEQ={MAX_SEGMENTS_PER_SEQ}."
+                    f"above MAX_SEGMENTS_PER_SEQ={waveform['max_segments_per_seq']}."
                 )
             if any(time_value <= 0 for time_value in times):
                 raise ValueError(f"CH{channel} seq {seq_id} has non-positive segment time.")
@@ -259,45 +339,22 @@ def validate_sequence_configs(configs_by_channel, seq_list_by_channel):
             raise ValueError(f"CH{channel} SEQ_LIST references missing seq IDs: {missing_seq_ids}")
 
 
-_rebuild_runtime_config()
-validate_sequence_configs(seq_configs, SEQ_LIST)
-
-
-def configure_measurement(
+def preview_waveform(
+    output_path=None,
     *,
-    params_override=None,
-    inst=None,
+    show=True,
+    title_prefix='FTJ PWM CH1',
     channels=None,
-    current_ranges=None,
-    segarb_options=None,
-    save_dir=None,
-    file_stem=None,
+    parameters=None,
+    waveform=None,
 ):
-    """Apply one complete workflow configuration and rebuild the PWM waveform."""
-    global INST, CH1, CH2, SAVE_DIR, FILE_STEM, CURRENT_RANGES, SEGARB_OPTIONS
-
-    if params_override is not None:
-        params.clear()
-        params.update(params_override)
-    if inst is not None:
-        INST = inst
-    if channels is not None:
-        CH1, CH2 = tuple(channels)
-    if current_ranges is not None:
-        CURRENT_RANGES = dict(current_ranges)
-    if segarb_options is not None:
-        SEGARB_OPTIONS = dict(segarb_options)
-    if save_dir is not None:
-        SAVE_DIR = Path(save_dir)
-    if file_stem is not None:
-        FILE_STEM = str(file_stem)
-    _rebuild_runtime_config()
-    validate_sequence_configs(seq_configs, SEQ_LIST)
-
-
-def preview_waveform(output_path=None, *, show=True, title_prefix="FTJ PWM CH1"):
     """Preview the full generated PWM waveform on CH1."""
-    preview_config = expand_config_for_preview(ch1_full_pwm_config, PWM_REPEAT_COUNT, seq_id=0)
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
+    preview_config = expand_config_for_preview(waveform['ch1_full_pwm_config'], waveform['pwm_repeat_count'], seq_id=0)
     return preview_sequence_configs(
         [preview_config],
         output_path,
@@ -306,57 +363,30 @@ def preview_waveform(output_path=None, *, show=True, title_prefix="FTJ PWM CH1")
     )
 
 
-def expand_config_for_preview(config, repeat_count, *, seq_id=0):
-    """Return a repeated copy for preview/export-only waveform tracing."""
-    start_v = []
-    stop_v = []
-    time_values = []
-    meas_types = []
-    meas_start = []
-    meas_stop = []
-
-    for _ in range(repeat_count):
-        start_v.extend(config[1])
-        stop_v.extend(config[2])
-        time_values.extend(config[3])
-        meas_types.extend(config[4])
-        meas_start.extend(config[5])
-        meas_stop.extend(config[6])
-
-    return (seq_id, start_v, stop_v, time_values, meas_types, meas_start, meas_stop)
-
-
-def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, add_gap=True):
-    """Append t-V endpoint pairs for one waveform block."""
-    cursor = start_time
-    for segment_start_v, segment_stop_v, segment_time in zip(start_v, stop_v, time_values):
-        next_cursor = cursor + segment_time
-        points.append((cursor, segment_start_v))
-        points.append((next_cursor, segment_stop_v))
-        cursor = next_cursor
-    if add_gap:
-        points.append((None, None))
-    return cursor
-
-
-def build_waveform_trace_table():
+def build_waveform_trace_table(*, channels=None, parameters=None, waveform=None):
     """Return one wide t-V table for plotting write/read command waveforms."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
     write_positive_points = []
     write_negative_points = []
     read_points = []
     cursor = 0.0
 
-    for step in PWM_STEPS:
+    for step in waveform['pwm_steps']:
         write_start_v, write_stop_v, write_times = build_pulse_block(
             step["WriteVoltage"],
-            WRITE_POSITIVE_TRF if step["Polarity"] == "positive" else WRITE_NEGATIVE_TRF,
+            waveform['write_positive_trf'] if step["Polarity"] == "positive" else waveform['write_negative_trf'],
             step["WriteWidth_s"],
-            WRITE_POSITIVE_IDLE if step["Polarity"] == "positive" else WRITE_NEGATIVE_IDLE,
+            waveform['write_positive_idle'] if step["Polarity"] == "positive" else waveform['write_negative_idle'],
+            base_v=waveform['base_v'],
         )
         write_points = write_positive_points if step["Polarity"] == "positive" else write_negative_points
         cursor = _extend_trace_points(write_points, write_start_v, write_stop_v, write_times, cursor)
 
-        read_start_v, read_stop_v, read_times = build_pulse_block(READ_V, READ_TRF, READ_DWELL, READ_IDLE)
+        read_start_v, read_stop_v, read_times = build_pulse_block(waveform['read_v'], waveform['read_trf'], waveform['read_dwell'], waveform['read_idle'], base_v=waveform['base_v'])
         cursor = _extend_trace_points(read_points, read_start_v, read_stop_v, read_times, cursor)
 
     trace_columns = {
@@ -370,29 +400,34 @@ def build_waveform_trace_table():
     return pd.DataFrame({name: pd.Series(values) for name, values in trace_columns.items()})
 
 
-def build_readback_table(df_ch1, df_ch2):
+def build_readback_table(df_ch1, df_ch2, *, channels=None, parameters=None, waveform=None):
     """Return one readback row per commanded PWM width."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
         raise ValueError("PWM run returned empty data.")
 
-    expected_count = len(PWM_STEPS)
+    expected_count = len(waveform['pwm_steps'])
     actual_counts = (len(df_ch1), len(df_ch2))
     if actual_counts != (expected_count, expected_count):
         raise ValueError(
             "PWM readback count mismatch: "
-            f"expected {expected_count}, got CH{CH1}={actual_counts[0]} "
-            f"and CH{CH2}={actual_counts[1]}."
+            f"expected {expected_count}, got CH{ch1}={actual_counts[0]} "
+            f"and CH{ch2}={actual_counts[1]}."
         )
     count = expected_count
-    step_df = pd.DataFrame(PWM_STEPS[:count])
+    step_df = pd.DataFrame(waveform['pwm_steps'][:count])
     pwm_df = pd.DataFrame(
         {
-            "TimestampI1": df_ch1[f"Timestamp {CH1}"].values[:count],
-            "TimestampI2": df_ch2[f"Timestamp {CH2}"].values[:count],
-            "ReadVoltageI1": df_ch1[f"Voltage {CH1}"].values[:count],
-            "ReadVoltageI2": df_ch2[f"Voltage {CH2}"].values[:count],
-            "CurrentI1": df_ch1[f"Current {CH1}"].values[:count],
-            "CurrentI2": df_ch2[f"Current {CH2}"].values[:count],
+            "TimestampI1": df_ch1[f"Timestamp {ch1}"].values[:count],
+            "TimestampI2": df_ch2[f"Timestamp {ch2}"].values[:count],
+            "ReadVoltageI1": df_ch1[f"Voltage {ch1}"].values[:count],
+            "ReadVoltageI2": df_ch2[f"Voltage {ch2}"].values[:count],
+            "CurrentI1": df_ch1[f"Current {ch1}"].values[:count],
+            "CurrentI2": df_ch2[f"Current {ch2}"].values[:count],
         }
     )
     pwm_df = pd.concat([step_df, pwm_df], axis=1)
@@ -402,41 +437,66 @@ def build_readback_table(df_ch1, df_ch2):
     return pwm_df
 
 
-def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
+def run_test(
+    params_override=None,
+    *,
+    save_results=True,
+    save_dir=None,
+    file_stem=None,
+    channels=None,
+    current_ranges=None,
+    inst=None,
+    preview_only=None,
+    save_waveform_preview=None,
+    segarb_options=None,
+):
     """Run the FTJ PWM width sweep and optionally save data."""
-    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    parameters = merge_parameters(params, params_override)
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    current_ranges = dict(current_ranges) if current_ranges is not None else dict(zip(channels, (CURRENT_RANGES[CH1], CURRENT_RANGES[CH2])))
     file_stem = FILE_STEM if file_stem is None else str(file_stem)
-    with PMUSession(INST, channels=(CH1, CH2)) as session:
+    inst = INST if inst is None else inst
+    preview_only = PREVIEW_ONLY if preview_only is None else preview_only
+    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    save_waveform_preview = SAVE_WAVEFORM_PREVIEW if save_waveform_preview is None else save_waveform_preview
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+    waveform = build_waveform(parameters=parameters, channels=channels)
+
+    if preview_only:
+        return {"preview": preview_waveform(channels=channels, parameters=parameters, waveform=waveform), "output_path": None, "params": dict(parameters), "accepted_current_ranges": {}}
+
+    with PMUSession(inst, channels=(ch1, ch2)) as session:
         query = session.query
         execute_segARB_test(
             query,
-            channels=[CH1, CH2],
-            seq_configs=seq_configs,
-            seq_list=SEQ_LIST,
-            current_ranges=CURRENT_RANGES,
-            options=SEGARB_OPTIONS,
+            channels=[ch1, ch2],
+            seq_configs=waveform['seq_configs'],
+            seq_list=waveform['seq_list'],
+            current_ranges=current_ranges,
+            options=segarb_options,
         )
 
-        df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
-        power_off_outputs(query, (CH1, CH2))
+        df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
+        power_off_outputs(query, (ch1, ch2))
 
-    pwm_df = build_readback_table(df_ch1, df_ch2)
-    waveform_df = build_waveform_trace_table()
+    pwm_df = build_readback_table(df_ch1, df_ch2, channels=channels, parameters=parameters, waveform=waveform)
+    waveform_df = build_waveform_trace_table(channels=channels, parameters=parameters, waveform=waveform)
     output_path = None
     preview_path = None
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, params["write_positive_v"], "tw" + time_tag(params["write_base_dwell"])),
+            save_dir, measurement_name(file_stem, parameters["write_positive_v"], "tw" + time_tag(parameters["write_base_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {
             "saved_at": saved_at(),
-            **params,
-            "inst": INST,
-            "channels": (CH1, CH2),
-            "current_ranges": CURRENT_RANGES,
-            "segarb_options": SEGARB_OPTIONS,
+            **parameters,
+            "inst": inst,
+            "channels": (ch1, ch2),
+            "current_ranges": current_ranges,
+            "segarb_options": segarb_options,
         }
         params_df = pd.DataFrame(
             {"name": saved_params.keys(), "value": map(repr, saved_params.values())}
@@ -449,11 +509,11 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
             waveform_df.to_excel(writer, sheet_name="Waveform", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
 
-        if SAVE_WAVEFORM_PREVIEW:
+        if save_waveform_preview:
             preview_path = Path(f"{output_stem}_waveform.png")
-            preview_waveform(preview_path)
+            preview_waveform(preview_path, channels=channels, parameters=parameters, waveform=waveform)
 
-    return {
+    result = {
         "df_ch1": df_ch1,
         "df_ch2": df_ch2,
         "pwm_df": pwm_df,
@@ -461,15 +521,10 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
         "output_path": output_path,
         "preview_path": preview_path,
     }
-
-
-def main():
-    """Run the FTJ PWM width sweep and save readback data."""
-    if PREVIEW_ONLY:
-        preview_waveform()
-        return
-    run_ftj_test()
+    result.update(params=dict(parameters), accepted_current_ranges={})
+    result["settings"] = {"inst": inst, "channels": channels, "segarb_options": segarb_options}
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    run_test()

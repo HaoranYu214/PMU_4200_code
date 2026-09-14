@@ -21,9 +21,10 @@ SRC_ROOT = REPO_ROOT / "src"
 for path in (SRC_ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
+
+from keithley4200.parameter_defaults import remember_current_ranges
 from keithley4200.output import reserve_summary_stem
 from measurements.pmu.fe_cap import PUND_tri, PV2
-from workflows.pv_and_pund import configure_measurement
 
 # =============================================================================
 # USER CONFIGURATION
@@ -93,28 +94,13 @@ def frequency_to_rise_time(frequency_hz):
     return 1.0 / (4.0 * frequency_hz)
 
 
-def configure_test(
-    module,
-    *,
-    base_params,
-    vp,
-    frequency_hz,
-    delay_time_s,
-    save_dir,
-):
-    """Apply a complete base configuration plus one map point."""
+def make_parameters(base_params, vp, frequency_hz, delay_time_s):
+    """Build the complete parameter dictionary for one map point."""
     effective_params = dict(base_params)
-    effective_params["Vp"] = float(vp)
-    effective_params["rise_time"] = frequency_to_rise_time(frequency_hz)
-    effective_params["delay_time"] = float(delay_time_s)
-    configure_measurement(
-        module,
-        params=effective_params,
-        segarb_options=SEGARB_OPTIONS,
-        save_dir=save_dir,
-        inst=INST,
-        channels=(CH1, CH2),
-    )
+    effective_params.update(Vp=float(vp),
+                            rise_time=frequency_to_rise_time(frequency_hz),
+                            delay_time=float(delay_time_s))
+    return effective_params
 
 
 def snapshot_files(directory):
@@ -144,14 +130,9 @@ def run_one_test(
 ):
     """Configure and run one test, returning one summary row."""
     Path(save_dir).mkdir(parents=True, exist_ok=True)
-    configure_test(
-        module,
-        base_params=base_params,
-        vp=vp,
-        frequency_hz=frequency_hz,
-        delay_time_s=delay_time_s,
-        save_dir=save_dir,
-    )
+    effective_params = make_parameters(base_params, vp, frequency_hz, delay_time_s)
+    options = {**module.SEGARB_OPTIONS, **SEGARB_OPTIONS}
+    accepted_ranges = {}
 
     start_time = datetime.now()
     before_files = snapshot_files(save_dir)
@@ -159,13 +140,18 @@ def run_one_test(
         f"[{run_index}/{total_runs}] {test_name}: "
         f"Vp={vp:g} V, f={frequency_hz:g} Hz, "
         f"delay={delay_time_s:g} s, "
-        f"rise={module.params['rise_time']:.3e} s"
+        f"rise={effective_params['rise_time']:.3e} s"
     )
 
     status = "ok"
     error_text = ""
     try:
-        module.main()
+        result = module.run_test(
+            params_override=effective_params, inst=INST, channels=(CH1, CH2),
+            segarb_options=options, save_dir=save_dir, preview_only=False,
+        )
+        effective_params = result["params"]
+        accepted_ranges = result["accepted_current_ranges"]
     except KeyboardInterrupt:
         raise
     except Exception:
@@ -173,26 +159,31 @@ def run_one_test(
         error_text = traceback.format_exc()
         print(error_text)
 
+    remember_current_ranges(
+        base_params, accepted_ranges, __file__,
+        "PV2_BASE_PARAMS" if test_name == "PV2" else "PUND_BASE_PARAMS",
+    )
     end_time = datetime.now()
     after_files = snapshot_files(save_dir)
     new_files = sorted(str(path) for path in after_files - before_files)
     return {
+        "accepted_current_ranges": dict(accepted_ranges),
         "run_index": run_index,
         "test": test_name,
         "status": status,
         "Vp_V": vp,
         "frequency_Hz": frequency_hz,
-        "rise_time_s": module.params["rise_time"],
+        "rise_time_s": effective_params["rise_time"],
         "delay_time_s": delay_time_s,
-        "offset_V": module.params["offset"],
-        "offset_ramp_time_s": module.params.get("offset_ramp_time"),
-        "area_cm2": module.params["area_cm2"],
-        "Irange1_A": module.params["Irange1"],
-        "Irange2_A": module.params["Irange2"],
-        "load_config_enabled": module.SEGARB_OPTIONS["ENABLE_LOAD_CONFIG"],
-        "load_resistance_ohm": module.SEGARB_OPTIONS["LOAD_RESISTANCE"],
-        "connection_comp_enabled": module.SEGARB_OPTIONS["ENABLE_CONNECTION_COMP"],
-        "llec_enabled": module.SEGARB_OPTIONS["ENABLE_LLEC"],
+        "offset_V": effective_params["offset"],
+        "offset_ramp_time_s": effective_params.get("offset_ramp_time"),
+        "area_cm2": effective_params["area_cm2"],
+        "Irange1_A": effective_params["Irange1"],
+        "Irange2_A": effective_params["Irange2"],
+        "load_config_enabled": options["ENABLE_LOAD_CONFIG"],
+        "load_resistance_ohm": options["LOAD_RESISTANCE"],
+        "connection_comp_enabled": options["ENABLE_CONNECTION_COMP"],
+        "llec_enabled": options["ENABLE_LLEC"],
         "start_time": start_time,
         "end_time": end_time,
         "duration_s": (end_time - start_time).total_seconds(),

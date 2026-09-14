@@ -74,7 +74,7 @@ class DryRunState:
             key = name.removeprefix(":PMU:SARB:SEQ:")
             append = key.endswith(":ADD")
             key = key.removesuffix(":ADD")
-            if key in {"STARTV", "STOPV", "TIME", "MEAS:TYPE", "MEAS:START", "MEAS:STOP"}:
+            if key in {"STARTV", "STOPV", "TIME", "MEAS:TYPE", "MEAS:START", "MEAS:STOP", "SSR"}:
                 sequence = self.sequences.setdefault((int(args[0]), int(args[1])), {})
                 values = [float(value) for value in args[2:]]
                 if append:
@@ -122,6 +122,8 @@ class DryRunState:
                 for _ in range(loops):
                     for i, duration in enumerate(durations):
                         mode = int(modes[i])
+                        if not sequence.get("SSR", [1]*len(durations))[i] and mode:
+                            raise NotImplementedError("Dry-run cannot simulate measurements on an SSR-open channel.")
                         if mode in (3, 4):
                             raise NotImplementedError("Dry-run does not model averaged Segment Arb modes 3/4.")
                         count = self.SAMPLES_PER_SEGMENT if mode == 2 else int(mode == 1)
@@ -285,12 +287,18 @@ def install_dry_run_hooks(no_save=False):
         if path is not None and str(path) not in sys.path:
             sys.path.insert(0, str(path))
     import keithley4200.output as output
+    import keithley4200.parameter_defaults as parameter_defaults
     import keithley4200.pmu.data_processing as data_processing
     import keithley4200.transport as transport
     import keithley4200.pmu.session as session
     import matplotlib.figure as mpl_figure
     import pandas as pd
 
+    # Synthetic data must never change the real experiment starting ranges.
+    parameter_defaults.write_current_range_defaults = (
+        lambda source_path, ranges, parameter_name="params":
+        print(f"# SKIP_DEFAULTS {source_path} {parameter_name}: {ranges}")
+    )
     state = DryRunState()
 
     class SharedDryRunCommunications(DryRunCommunications):

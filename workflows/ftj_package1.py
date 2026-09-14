@@ -171,20 +171,6 @@ def load_test_modules():
     }
 
 
-def configure_test(test_name, module, *, save_dir=None):
-    """Apply one complete stage configuration and rebuild its waveform."""
-    config = FTJ_TESTS[test_name]
-    module.configure_measurement(
-        params_override=dict(config["params"]),
-        inst=INST,
-        channels=(CH1, CH2),
-        current_ranges=dict(config["current_ranges"]),
-        segarb_options=dict(COMMON_SEGARB_OPTIONS),
-        save_dir=config["save_dir"] if save_dir is None else save_dir,
-    )
-    return config
-
-
 def validate_package_config():
     unknown = [test_name for test_name in RUN_ORDER if test_name not in FTJ_TESTS]
     if unknown:
@@ -201,11 +187,15 @@ def run_package(*, modules=None):
 
     for stage_number, test_name in enumerate(RUN_ORDER, start=1):
         module = modules[test_name]
-        config = configure_test(test_name, module)
+        config = FTJ_TESTS[test_name]
         display_name = config["display_name"]
         print(f"\n=== FTJ stage {stage_number}/{len(RUN_ORDER)}: {display_name} ===")
         try:
-            results[test_name] = module.run_ftj_test(save_results=True)
+            results[test_name] = module.run_test(
+                params_override=config["params"], inst=INST, channels=(CH1, CH2),
+                current_ranges=config["current_ranges"], segarb_options=COMMON_SEGARB_OPTIONS,
+                save_dir=config["save_dir"], save_results=True, preview_only=False,
+            )
         except KeyboardInterrupt:
             raise
         except Exception:
@@ -230,9 +220,10 @@ def preview_package(*, modules=None, show=True):
     figures = []
     for test_name in RUN_ORDER:
         module = modules[test_name]
-        config = configure_test(test_name, module)
+        config = FTJ_TESTS[test_name]
         figures.append(
             module.preview_waveform(
+                parameters={**module.params, **config["params"]}, channels=(CH1, CH2),
                 show=False,
                 title_prefix=f"FTJ package1 | {config['display_name']}",
             )

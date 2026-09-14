@@ -18,6 +18,8 @@ for path in (SRC_ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from keithley4200.parameter_defaults import remember_current_ranges
+
 
 
 # =============================================================================
@@ -44,8 +46,7 @@ RISE_TIME = 2.5e-4
 OFFSET_BOTH = 0
 
 
-# These dictionaries replace the measurement files' ``params`` dictionaries
-# completely.  Therefore Vp/rise_time/delay_time/offset also control the PV2
+# These dictionaries override the measurement files' default params.  Therefore Vp/rise_time/delay_time/offset also control the PV2
 # conditioning triangle and every PUND preset/P/U/N/D pulse; no waveform part
 # falls back to a hidden value from the original entry files.
 PV2_PARAMS = {
@@ -88,25 +89,6 @@ def load_measurements():
     }
 
 
-def configure_measurement(
-    module,
-    *,
-    params,
-    segarb_options,
-    save_dir,
-    inst,
-    channels,
-):
-    """Inject the complete run config before any waveform is constructed."""
-    module.INST = inst
-    module.CH1, module.CH2 = channels
-    module.params.clear()
-    module.params.update(params)
-    module.SEGARB_OPTIONS.clear()
-    module.SEGARB_OPTIONS.update(segarb_options)
-    module.SAVE_DIR = Path(save_dir)
-
-
 def run_pv_and_pund(
     *,
     inst=INST,
@@ -128,6 +110,7 @@ def run_pv_and_pund(
     )
     save_dirs = dict(SAVE_DIRS if save_dirs is None else save_dirs)
 
+    results = {}
     steps = (
         ("PV2", modules["PV2"], pv2_params),
         ("PUND_tri", modules["PUND_tri"], pund_params),
@@ -135,27 +118,31 @@ def run_pv_and_pund(
     for step_number, (name, module, params) in enumerate(steps, start=1):
         save_dir = Path(save_dirs[name])
         save_dir.mkdir(parents=True, exist_ok=True)
-        configure_measurement(
-            module,
-            params=params,
-            segarb_options=segarb_options,
-            save_dir=save_dir,
-            inst=inst,
-            channels=tuple(channels),
-        )
         print(f"\n=== PV and PUND {step_number}/2: {name} ===")
         try:
-            module.main()
+            results[name] = module.run_test(
+                params_override=params, inst=inst, channels=channels,
+                segarb_options=segarb_options, save_dir=save_dir, preview_only=False,
+            )
         except KeyboardInterrupt:
             raise
         except Exception:
             if stop_on_error:
                 raise
             print(traceback.format_exc())
+        finally:
+            # Reuse accepted ranges for subsequent calls in this Python process.
+            accepted = results.get(name, {}).get("accepted_current_ranges", {})
+            params.update(accepted)
+            defaults = PV2_PARAMS if name == "PV2" else PUND_PARAMS
+            remember_current_ranges(
+                defaults, accepted, __file__, "PV2_PARAMS" if name == "PV2" else "PUND_PARAMS",
+            )
         if step_number == 1 and settle_time_s > 0:
             time.sleep(float(settle_time_s))
 
     print("PV and PUND complete.")
+    return results
 
 
 def preview_pv_and_pund(
@@ -183,19 +170,12 @@ def preview_pv_and_pund(
         ("PV2", modules["PV2"], pv2_params),
         ("PUND_tri", modules["PUND_tri"], pund_params),
     ):
-        configure_measurement(
-            module,
-            params=params,
-            segarb_options=segarb_options,
-            save_dir=BASE_SAVE_DIR,
-            inst=inst,
-            channels=tuple(channels),
-        )
         preview_title = (
             None if title_prefix is None else f"{title_prefix} | {name}"
         )
         results.append(
             module.preview_waveform(
+                parameters={**module.params, **params}, channels=channels,
                 show=False,
                 title_prefix=preview_title,
             )

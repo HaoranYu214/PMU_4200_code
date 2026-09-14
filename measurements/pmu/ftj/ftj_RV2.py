@@ -26,6 +26,7 @@ from keithley4200.pmu.pmu_tests import (
     validate_segment_arb_configs,
 )
 from keithley4200.pmu.session import PMUSession
+from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
@@ -67,71 +68,6 @@ params = {
 }
 
 
-def _sync_parameter_aliases():
-    """Expose readable legacy names while keeping ``params`` authoritative."""
-    global BASE_V, OFFSET_V, VP, WRITE_LEVEL_STEP, READ, READ_LEVEL, PREPOST_LEVEL
-    global SCAN_CYCLES, PREPOST_DWELL, WRITE_DWELL, READ_DWELL
-    global PREPOST_RISE, PREPOST_FALL, PREPOST_IDLE_2
-    global WRITE_RISE, WRITE_FALL, WRITE_IDLE_2
-    global READ_RISE, READ_FALL, READ_IDLE_2
-
-    BASE_V = float(params["base_v"])
-    OFFSET_V = float(params["offset_v"])
-    VP = float(params["vp"])
-    WRITE_LEVEL_STEP = float(params["write_level_step"])
-    READ = float(params["read_v"])
-    READ_LEVEL = READ - OFFSET_V
-    # This is a relative level; the physical prepost voltage is OFFSET_V - VP.
-    PREPOST_LEVEL = -VP
-    SCAN_CYCLES = int(params["scan_cycles"])
-    PREPOST_DWELL = float(params["prepost_dwell"])
-    WRITE_DWELL = float(params["write_dwell"])
-    READ_DWELL = float(params["read_dwell"])
-    PREPOST_RISE = float(params["prepost_rise"])
-    PREPOST_FALL = float(params["prepost_fall"])
-    PREPOST_IDLE_2 = float(params["prepost_idle"])
-    WRITE_RISE = float(params["write_rise"])
-    WRITE_FALL = float(params["write_fall"])
-    WRITE_IDLE_2 = float(params["write_idle"])
-    READ_RISE = float(params["read_rise"])
-    READ_FALL = float(params["read_fall"])
-    READ_IDLE_2 = float(params["read_idle"])
-
-
-_sync_parameter_aliases()
-
-PREPOST_SEQ_ID = 1
-FIRST_SCAN_SEQ_ID = 2
-SEGMENTS_PER_SCAN_POINT = 8
-MAX_SEGMENTS_PER_SEQ = MAX_SEGMENTS_PER_SEQUENCE
-
-
-
-time_values_prepost = [PREPOST_RISE, PREPOST_DWELL, PREPOST_FALL, PREPOST_IDLE_2]
-time_values_write = [WRITE_RISE, WRITE_DWELL, WRITE_FALL, WRITE_IDLE_2]
-time_values_read = [READ_RISE, READ_DWELL, READ_FALL, READ_IDLE_2]
-
-meas_types_prepost = [0, 0, 0, 0]
-meas_start_prepost = [0.0] * len(time_values_prepost)
-meas_stop_prepost = [0.0] * len(time_values_prepost)
-
-meas_types_write = [0, 0, 0, 0]
-meas_start_write = [0.0, WRITE_DWELL* 0, 0.0, 0.0]
-meas_stop_write = [0.0, 0.0, 0.0, 0.0]
-
-meas_types_read = [0, 1, 0, 0]
-meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-
-def build_pulse_block(level, time_values):
-    """Return a base -> (write offset + relative level) -> base pulse."""
-    target_v = OFFSET_V + level
-    start_v = [BASE_V, target_v, target_v, BASE_V]
-    stop_v = [target_v, target_v, BASE_V, BASE_V]
-    return start_v, stop_v, list(time_values)
-
-
 def _levels_between(start_level, stop_level, step):
     """Return inclusive levels from start_level to stop_level."""
     if start_level == stop_level:
@@ -149,7 +85,6 @@ def _levels_between(start_level, stop_level, step):
     levels.append(round(stop_level, 10))
     return levels
 
-
 def voltage_sweep_path(vp, step, cycles=1):
     """Return relative levels: +Vp -> -Vp -> +Vp, repeated for the requested cycles."""
     if vp == 0:
@@ -166,159 +101,6 @@ def voltage_sweep_path(vp, step, cycles=1):
         path.extend(up_leg[1:])
     return path
 
-
-def make_prepost_sequence():
-    """Build the prepost sequence: one pulse only."""
-    start_v, stop_v, time_values = build_pulse_block(PREPOST_LEVEL, time_values_prepost)
-    ch1_config = (PREPOST_SEQ_ID, start_v, stop_v, time_values, meas_types_prepost, meas_start_prepost, meas_stop_prepost)
-    ch2_config = (
-        PREPOST_SEQ_ID,
-        [0.0] * len(time_values),
-        [0.0] * len(time_values),
-        time_values,
-        meas_types_prepost,
-        meas_start_prepost,
-        meas_stop_prepost,
-    )
-    return ch1_config, ch2_config
-
-
-def make_scan_sequence(seq_id, voltages):
-    """Build one scan sequence: write pulse, then small read pulse, for a chunk of scan points."""
-    ch1_start_v = []
-    ch1_stop_v = []
-    ch2_start_v = []
-    ch2_stop_v = []
-    time_values = []
-    meas_types = []
-    meas_start = []
-    meas_stop = []
-
-    for voltage in voltages:
-        write_start_v, write_stop_v, write_times = build_pulse_block(voltage, time_values_write)
-        ch1_start_v.extend(write_start_v)
-        ch1_stop_v.extend(write_stop_v)
-        ch2_start_v.extend([0.0] * len(write_times))
-        ch2_stop_v.extend([0.0] * len(write_times))
-        time_values.extend(write_times)
-        meas_types.extend(meas_types_write)
-        meas_start.extend(meas_start_write)
-        meas_stop.extend(meas_stop_write)
-
-        read_start_v, read_stop_v, read_times = build_pulse_block(READ_LEVEL, time_values_read)
-        ch1_start_v.extend(read_start_v)
-        ch1_stop_v.extend(read_stop_v)
-        ch2_start_v.extend([0.0] * len(read_times))
-        ch2_stop_v.extend([0.0] * len(read_times))
-        time_values.extend(read_times)
-        meas_types.extend(meas_types_read)
-        meas_start.extend(meas_start_read)
-        meas_stop.extend(meas_stop_read)
-
-    if len(time_values) > MAX_SEGMENTS_PER_SEQ:
-        raise ValueError(
-            f"RV scan sequence has {len(time_values)} segments, "
-            f"above MAX_SEGMENTS_PER_SEQ={MAX_SEGMENTS_PER_SEQ}."
-        )
-
-    ch1_config = (seq_id, ch1_start_v, ch1_stop_v, time_values, meas_types, meas_start, meas_stop)
-    ch2_config = (seq_id, ch2_start_v, ch2_stop_v, time_values, meas_types, meas_start, meas_stop)
-    return ch1_config, ch2_config
-
-
-def chunk_scan_voltages(voltages):
-    """Split scan voltages into multiple sequences to stay below the PMU segment limit."""
-    max_points_per_seq = max(1, MAX_SEGMENTS_PER_SEQ // SEGMENTS_PER_SCAN_POINT)
-    return [
-        voltages[index : index + max_points_per_seq]
-        for index in range(0, len(voltages), max_points_per_seq)
-    ]
-
-
-def _rebuild_runtime_config():
-    """Rebuild every waveform-derived value after workflow configuration."""
-    global time_values_prepost, time_values_write, time_values_read
-    global meas_start_read, meas_stop_read
-    global SCAN_LEVELS, SCAN_VOLTAGES, SCAN_LEVEL_CHUNKS
-    global ch1_prepost_config, ch2_prepost_config, scan_seq_ids
-    global scan_config_pairs, ch1_scan_configs, ch2_scan_configs
-    global seq_configs, SEQ_PLAN, SEQ_LIST, CURRENT_RANGES
-
-    _sync_parameter_aliases()
-    time_values_prepost = [PREPOST_RISE, PREPOST_DWELL, PREPOST_FALL, PREPOST_IDLE_2]
-    time_values_write = [WRITE_RISE, WRITE_DWELL, WRITE_FALL, WRITE_IDLE_2]
-    time_values_read = [READ_RISE, READ_DWELL, READ_FALL, READ_IDLE_2]
-    meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-    meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-    SCAN_LEVELS = voltage_sweep_path(VP, WRITE_LEVEL_STEP, SCAN_CYCLES)
-    SCAN_VOLTAGES = [OFFSET_V + level for level in SCAN_LEVELS]
-    SCAN_LEVEL_CHUNKS = chunk_scan_voltages(SCAN_LEVELS)
-    ch1_prepost_config, ch2_prepost_config = make_prepost_sequence()
-    scan_seq_ids = [FIRST_SCAN_SEQ_ID + index for index in range(len(SCAN_LEVEL_CHUNKS))]
-    scan_config_pairs = [
-        make_scan_sequence(seq_id, chunk)
-        for seq_id, chunk in zip(scan_seq_ids, SCAN_LEVEL_CHUNKS)
-    ]
-    ch1_scan_configs = [pair[0] for pair in scan_config_pairs]
-    ch2_scan_configs = [pair[1] for pair in scan_config_pairs]
-    seq_configs = {
-        CH1: [ch1_prepost_config] + ch1_scan_configs,
-        CH2: [ch2_prepost_config] + ch2_scan_configs,
-    }
-    SEQ_PLAN = [(PREPOST_SEQ_ID, 1)] + [(seq_id, 1) for seq_id in scan_seq_ids]
-    SEQ_LIST = {CH1: list(SEQ_PLAN), CH2: list(SEQ_PLAN)}
-    CURRENT_RANGES = {
-        CH1: float(CURRENT_RANGES.get(CH1, next(iter(CURRENT_RANGES.values())))),
-        CH2: float(CURRENT_RANGES.get(CH2, next(iter(CURRENT_RANGES.values())))),
-    }
-    validate_segment_arb_configs(seq_configs)
-
-
-_rebuild_runtime_config()
-
-
-def configure_measurement(
-    *,
-    params_override=None,
-    inst=None,
-    channels=None,
-    current_ranges=None,
-    segarb_options=None,
-    save_dir=None,
-    file_stem=None,
-):
-    """Apply one complete workflow configuration and rebuild the RV waveform."""
-    global INST, CH1, CH2, SAVE_DIR, FILE_STEM, CURRENT_RANGES, SEGARB_OPTIONS
-
-    if params_override is not None:
-        params.clear()
-        params.update(params_override)
-    if inst is not None:
-        INST = inst
-    if channels is not None:
-        CH1, CH2 = tuple(channels)
-    if current_ranges is not None:
-        CURRENT_RANGES = dict(current_ranges)
-    if segarb_options is not None:
-        SEGARB_OPTIONS = dict(segarb_options)
-    if save_dir is not None:
-        SAVE_DIR = Path(save_dir)
-    if file_stem is not None:
-        FILE_STEM = str(file_stem)
-    _rebuild_runtime_config()
-
-
-def preview_waveform(output_path=None, *, show=True, title_prefix="FTJ RV CH1"):
-    """Preview the generated RV waveform on CH1."""
-    return preview_sequence_configs(
-        [ch1_prepost_config] + ch1_scan_configs,
-        output_path,
-        title_prefix=title_prefix,
-        show=show,
-    )
-
-
 def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, add_gap=True):
     """Append t-V endpoint pairs for one waveform block."""
     cursor = start_time
@@ -332,8 +114,214 @@ def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, ad
     return cursor
 
 
-def build_waveform_trace_table():
+def build_waveform(*, parameters=None, channels=None):
+    """Build pulse arrays and execution metadata from this run's parameters."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    base_v = float(parameters["base_v"])
+    offset_v = float(parameters["offset_v"])
+    vp = float(parameters["vp"])
+    write_level_step = float(parameters["write_level_step"])
+    read = float(parameters["read_v"])
+    read_level = read - offset_v
+    prepost_level = -vp
+    scan_cycles = int(parameters["scan_cycles"])
+    prepost_dwell = float(parameters["prepost_dwell"])
+    write_dwell = float(parameters["write_dwell"])
+    read_dwell = float(parameters["read_dwell"])
+    prepost_rise = float(parameters["prepost_rise"])
+    prepost_fall = float(parameters["prepost_fall"])
+    prepost_idle_2 = float(parameters["prepost_idle"])
+    write_rise = float(parameters["write_rise"])
+    write_fall = float(parameters["write_fall"])
+    write_idle_2 = float(parameters["write_idle"])
+    read_rise = float(parameters["read_rise"])
+    read_fall = float(parameters["read_fall"])
+    read_idle_2 = float(parameters["read_idle"])
+    time_values_prepost = [prepost_rise, prepost_dwell, prepost_fall, prepost_idle_2]
+    time_values_write = [write_rise, write_dwell, write_fall, write_idle_2]
+    time_values_read = [read_rise, read_dwell, read_fall, read_idle_2]
+    meas_start_read = [0.0, read_dwell * 0.5, 0.0, 0.0]
+    meas_stop_read = [0.0, read_dwell * 0.9, 0.0, 0.0]
+    scan_levels = voltage_sweep_path(vp, write_level_step, scan_cycles)
+    scan_voltages = [offset_v + level for level in scan_levels]
+    max_segments_per_seq = MAX_SEGMENTS_PER_SEQUENCE
+    segments_per_scan_point = 8
+    scan_level_chunks = chunk_scan_voltages(scan_levels, max_segments_per_seq=max_segments_per_seq, segments_per_scan_point=segments_per_scan_point)
+    prepost_seq_id = 1
+    meas_start_prepost = [0.0] * len(time_values_prepost)
+    meas_stop_prepost = [0.0] * len(time_values_prepost)
+    meas_types_prepost = [0, 0, 0, 0]
+    ch1_prepost_config, ch2_prepost_config = make_prepost_sequence(base_v=base_v, meas_start_prepost=meas_start_prepost, meas_stop_prepost=meas_stop_prepost, meas_types_prepost=meas_types_prepost, offset_v=offset_v, prepost_level=prepost_level, prepost_seq_id=prepost_seq_id, time_values_prepost=time_values_prepost)
+    first_scan_seq_id = 2
+    scan_seq_ids = [first_scan_seq_id + index for index in range(len(scan_level_chunks))]
+    meas_start_write = [0.0, write_dwell* 0, 0.0, 0.0]
+    meas_stop_write = [0.0, 0.0, 0.0, 0.0]
+    meas_types_read = [0, 1, 0, 0]
+    meas_types_write = [0, 0, 0, 0]
+    scan_config_pairs = [
+        make_scan_sequence(seq_id, chunk, base_v=base_v, max_segments_per_seq=max_segments_per_seq, meas_start_read=meas_start_read, meas_start_write=meas_start_write, meas_stop_read=meas_stop_read, meas_stop_write=meas_stop_write, meas_types_read=meas_types_read, meas_types_write=meas_types_write, offset_v=offset_v, read_level=read_level, time_values_read=time_values_read, time_values_write=time_values_write)
+        for seq_id, chunk in zip(scan_seq_ids, scan_level_chunks)
+    ]
+    ch1_scan_configs = [pair[0] for pair in scan_config_pairs]
+    ch2_scan_configs = [pair[1] for pair in scan_config_pairs]
+    seq_configs = {
+        ch1: [ch1_prepost_config] + ch1_scan_configs,
+        ch2: [ch2_prepost_config] + ch2_scan_configs,
+    }
+    seq_plan = [(prepost_seq_id, 1)] + [(seq_id, 1) for seq_id in scan_seq_ids]
+    seq_list = {ch1: list(seq_plan), ch2: list(seq_plan)}
+    validate_segment_arb_configs(seq_configs)
+    return {
+        'base_v': base_v,
+        'offset_v': offset_v,
+        'read_level': read_level,
+        'scan_levels': scan_levels,
+        'scan_level_chunks': scan_level_chunks,
+        'scan_voltages': scan_voltages,
+        'seq_list': seq_list,
+        'ch1_prepost_config': ch1_prepost_config,
+        'ch1_scan_configs': ch1_scan_configs,
+        'seq_configs': seq_configs,
+        'time_values_read': time_values_read,
+        'time_values_write': time_values_write,
+    }
+
+
+def build_pulse_block(level, time_values, *, base_v, offset_v):
+    """Return a base -> (write offset + relative level) -> base pulse."""
+    target_v = offset_v + level
+    start_v = [base_v, target_v, target_v, base_v]
+    stop_v = [target_v, target_v, base_v, base_v]
+    return start_v, stop_v, list(time_values)
+
+
+def make_prepost_sequence(
+    *,
+    base_v,
+    meas_start_prepost,
+    meas_stop_prepost,
+    meas_types_prepost,
+    offset_v,
+    prepost_level,
+    prepost_seq_id,
+    time_values_prepost,
+):
+    """Build the prepost sequence: one pulse only."""
+    start_v, stop_v, time_values = build_pulse_block(prepost_level, time_values_prepost, base_v=base_v, offset_v=offset_v)
+    ch1_config = (prepost_seq_id, start_v, stop_v, time_values, meas_types_prepost, meas_start_prepost, meas_stop_prepost)
+    ch2_config = (
+        prepost_seq_id,
+        [0.0] * len(time_values),
+        [0.0] * len(time_values),
+        time_values,
+        meas_types_prepost,
+        meas_start_prepost,
+        meas_stop_prepost,
+    )
+    return ch1_config, ch2_config
+
+
+def make_scan_sequence(
+    seq_id,
+    voltages,
+    *,
+    base_v,
+    max_segments_per_seq,
+    meas_start_read,
+    meas_start_write,
+    meas_stop_read,
+    meas_stop_write,
+    meas_types_read,
+    meas_types_write,
+    offset_v,
+    read_level,
+    time_values_read,
+    time_values_write,
+):
+    """Build one scan sequence: write pulse, then small read pulse, for a chunk of scan points."""
+    ch1_start_v = []
+    ch1_stop_v = []
+    ch2_start_v = []
+    ch2_stop_v = []
+    time_values = []
+    meas_types = []
+    meas_start = []
+    meas_stop = []
+
+    for voltage in voltages:
+        write_start_v, write_stop_v, write_times = build_pulse_block(voltage, time_values_write, base_v=base_v, offset_v=offset_v)
+        ch1_start_v.extend(write_start_v)
+        ch1_stop_v.extend(write_stop_v)
+        ch2_start_v.extend([0.0] * len(write_times))
+        ch2_stop_v.extend([0.0] * len(write_times))
+        time_values.extend(write_times)
+        meas_types.extend(meas_types_write)
+        meas_start.extend(meas_start_write)
+        meas_stop.extend(meas_stop_write)
+
+        read_start_v, read_stop_v, read_times = build_pulse_block(read_level, time_values_read, base_v=base_v, offset_v=offset_v)
+        ch1_start_v.extend(read_start_v)
+        ch1_stop_v.extend(read_stop_v)
+        ch2_start_v.extend([0.0] * len(read_times))
+        ch2_stop_v.extend([0.0] * len(read_times))
+        time_values.extend(read_times)
+        meas_types.extend(meas_types_read)
+        meas_start.extend(meas_start_read)
+        meas_stop.extend(meas_stop_read)
+
+    if len(time_values) > max_segments_per_seq:
+        raise ValueError(
+            f"RV scan sequence has {len(time_values)} segments, "
+            f"above MAX_SEGMENTS_PER_SEQ={max_segments_per_seq}."
+        )
+
+    ch1_config = (seq_id, ch1_start_v, ch1_stop_v, time_values, meas_types, meas_start, meas_stop)
+    ch2_config = (seq_id, ch2_start_v, ch2_stop_v, time_values, meas_types, meas_start, meas_stop)
+    return ch1_config, ch2_config
+
+
+def chunk_scan_voltages(voltages, *, max_segments_per_seq, segments_per_scan_point):
+    """Split scan voltages into multiple sequences to stay below the PMU segment limit."""
+    max_points_per_seq = max(1, max_segments_per_seq // segments_per_scan_point)
+    return [
+        voltages[index : index + max_points_per_seq]
+        for index in range(0, len(voltages), max_points_per_seq)
+    ]
+
+
+def preview_waveform(
+    output_path=None,
+    *,
+    show=True,
+    title_prefix='FTJ RV CH1',
+    channels=None,
+    parameters=None,
+    waveform=None,
+):
+    """Preview the generated RV waveform on CH1."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
+    return preview_sequence_configs(
+        [waveform['ch1_prepost_config']] + waveform['ch1_scan_configs'],
+        output_path,
+        title_prefix=title_prefix,
+        show=show,
+    )
+
+
+def build_waveform_trace_table(*, channels=None, parameters=None, waveform=None):
     """Return one wide t-V table for plotting prepost, write, and read waveforms."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
     prepost_points = []
     write_points = []
     read_points = []
@@ -341,16 +329,16 @@ def build_waveform_trace_table():
 
     cursor = _extend_trace_points(
         prepost_points,
-        ch1_prepost_config[1],
-        ch1_prepost_config[2],
-        ch1_prepost_config[3],
+        waveform['ch1_prepost_config'][1],
+        waveform['ch1_prepost_config'][2],
+        waveform['ch1_prepost_config'][3],
         cursor,
         add_gap=False,
     )
 
-    for chunk in SCAN_LEVEL_CHUNKS:
+    for chunk in waveform['scan_level_chunks']:
         for level in chunk:
-            write_start_v, write_stop_v, write_times = build_pulse_block(level, time_values_write)
+            write_start_v, write_stop_v, write_times = build_pulse_block(level, waveform['time_values_write'], base_v=waveform['base_v'], offset_v=waveform['offset_v'])
             cursor = _extend_trace_points(
                 write_points,
                 write_start_v,
@@ -359,7 +347,7 @@ def build_waveform_trace_table():
                 cursor,
             )
 
-            read_start_v, read_stop_v, read_times = build_pulse_block(READ_LEVEL, time_values_read)
+            read_start_v, read_stop_v, read_times = build_pulse_block(waveform['read_level'], waveform['time_values_read'], base_v=waveform['base_v'], offset_v=waveform['offset_v'])
             cursor = _extend_trace_points(
                 read_points,
                 read_start_v,
@@ -379,30 +367,35 @@ def build_waveform_trace_table():
     return pd.DataFrame({name: pd.Series(values) for name, values in trace_columns.items()})
 
 
-def build_readback_table(df_ch1, df_ch2):
+def build_readback_table(df_ch1, df_ch2, *, channels=None, parameters=None, waveform=None):
     """Return only the readback points, one row per commanded write level."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
     if df_ch1 is None or df_ch2 is None or df_ch1.empty or df_ch2.empty:
         raise ValueError("RV run returned empty data.")
 
-    expected_count = len(SCAN_VOLTAGES)
+    expected_count = len(waveform['scan_voltages'])
     actual_counts = (len(df_ch1), len(df_ch2))
     if actual_counts != (expected_count, expected_count):
         raise ValueError(
             "RV readback count mismatch: "
-            f"expected {expected_count}, got CH{CH1}={actual_counts[0]} "
-            f"and CH{CH2}={actual_counts[1]}."
+            f"expected {expected_count}, got CH{ch1}={actual_counts[0]} "
+            f"and CH{ch2}={actual_counts[1]}."
         )
     count = expected_count
     rv_df = pd.DataFrame(
         {
-            "CommandedWriteLevel": SCAN_LEVELS[:count],
-            "CommandedWriteVoltage": SCAN_VOLTAGES[:count],
-            "TimestampI1": df_ch1[f"Timestamp {CH1}"].values[:count],
-            "TimestampI2": df_ch2[f"Timestamp {CH2}"].values[:count],
-            "ReadVoltageI1": df_ch1[f"Voltage {CH1}"].values[:count],
-            "ReadVoltageI2": df_ch2[f"Voltage {CH2}"].values[:count],
-            "CurrentI1": df_ch1[f"Current {CH1}"].values[:count],
-            "CurrentI2": df_ch2[f"Current {CH2}"].values[:count],
+            "CommandedWriteLevel": waveform['scan_levels'][:count],
+            "CommandedWriteVoltage": waveform['scan_voltages'][:count],
+            "TimestampI1": df_ch1[f"Timestamp {ch1}"].values[:count],
+            "TimestampI2": df_ch2[f"Timestamp {ch2}"].values[:count],
+            "ReadVoltageI1": df_ch1[f"Voltage {ch1}"].values[:count],
+            "ReadVoltageI2": df_ch2[f"Voltage {ch2}"].values[:count],
+            "CurrentI1": df_ch1[f"Current {ch1}"].values[:count],
+            "CurrentI2": df_ch2[f"Current {ch2}"].values[:count],
         }
     )
     rv_df["ReadVoltageDiff"] = rv_df["ReadVoltageI1"] - rv_df["ReadVoltageI2"]
@@ -411,41 +404,64 @@ def build_readback_table(df_ch1, df_ch2):
     return rv_df
 
 
-def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
+def run_test(
+    params_override=None,
+    *,
+    save_results=True,
+    save_dir=None,
+    file_stem=None,
+    channels=None,
+    current_ranges=None,
+    inst=None,
+    preview_only=None,
+    segarb_options=None,
+):
     """Run the FTJ RV test and optionally save readback-only results."""
-    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    parameters = merge_parameters(params, params_override)
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    current_ranges = dict(current_ranges) if current_ranges is not None else dict(zip(channels, (CURRENT_RANGES[CH1], CURRENT_RANGES[CH2])))
     file_stem = FILE_STEM if file_stem is None else str(file_stem)
-    with PMUSession(INST, channels=(CH1, CH2)) as session:
+    inst = INST if inst is None else inst
+    preview_only = PREVIEW_ONLY if preview_only is None else preview_only
+    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+    waveform = build_waveform(parameters=parameters, channels=channels)
+
+    if preview_only:
+        return {"preview": preview_waveform(channels=channels, parameters=parameters, waveform=waveform), "output_path": None, "params": dict(parameters), "accepted_current_ranges": {}}
+
+    with PMUSession(inst, channels=(ch1, ch2)) as session:
         query = session.query
         execute_segARB_test(
             query,
-            channels=[CH1, CH2],
-            seq_configs=seq_configs,
-            seq_list=SEQ_LIST,
-            current_ranges=CURRENT_RANGES,
-            options=SEGARB_OPTIONS,
+            channels=[ch1, ch2],
+            seq_configs=waveform['seq_configs'],
+            seq_list=waveform['seq_list'],
+            current_ranges=current_ranges,
+            options=segarb_options,
         )
 
-        df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
-        power_off_outputs(query, (CH1, CH2))
+        df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
+        power_off_outputs(query, (ch1, ch2))
 
-    rv_df = build_readback_table(df_ch1, df_ch2)
-    waveform_df = build_waveform_trace_table()
+    rv_df = build_readback_table(df_ch1, df_ch2, channels=channels, parameters=parameters, waveform=waveform)
+    waveform_df = build_waveform_trace_table(channels=channels, parameters=parameters, waveform=waveform)
 
     output_path = None
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, params["vp"], "tw" + time_tag(params["write_dwell"])),
+            save_dir, measurement_name(file_stem, parameters["vp"], "tw" + time_tag(parameters["write_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {
             "saved_at": saved_at(),
-            **params,
-            "inst": INST,
-            "channels": (CH1, CH2),
-            "current_ranges": CURRENT_RANGES,
-            "segarb_options": SEGARB_OPTIONS,
+            **parameters,
+            "inst": inst,
+            "channels": (ch1, ch2),
+            "current_ranges": current_ranges,
+            "segarb_options": segarb_options,
         }
         params_df = pd.DataFrame(
             {"name": saved_params.keys(), "value": map(repr, saved_params.values())}
@@ -458,22 +474,17 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
             waveform_df.to_excel(writer, sheet_name="Waveform", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
 
-    return {
+    result = {
         "df_ch1": df_ch1,
         "df_ch2": df_ch2,
         "rv_df": rv_df,
         "waveform_df": waveform_df,
         "output_path": output_path,
     }
-
-
-def main():
-    """Run the FTJ RV sequence and save readback data."""
-    if PREVIEW_ONLY:
-        preview_waveform()
-        return
-    run_ftj_test()
+    result.update(params=dict(parameters), accepted_current_ranges={})
+    result["settings"] = {"inst": inst, "channels": channels, "segarb_options": segarb_options}
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    run_test()

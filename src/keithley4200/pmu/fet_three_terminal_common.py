@@ -10,7 +10,7 @@ from keithley4200.output import saved_at
 
 import pandas as pd
 
-from .data_processing import read_both_channels
+from .data_processing import read_both_channels, read_channel_data
 from .pmu_tests import execute_segARB_test, power_off_outputs
 
 
@@ -51,6 +51,26 @@ def source_smu_off(query, channel):
         query(f"DV{channel}")
     except Exception:
         pass
+
+
+def read_fet_channels(query, gate_channel, drain_channel, *, float_gate=False):
+    """Read Drain only when Gate is isolated; NaNs are explicit missing data.
+
+    Floating Gate voltage is not the PMU programmed voltage. Do not acquire
+    or infer Gate V/I from a disconnected PMU channel (KXCI SSR, 7-46).
+    """
+    if not float_gate:
+        return read_both_channels(query, gate_channel, drain_channel)
+    drain = read_channel_data(query, drain_channel)
+    if drain is None or drain.empty:
+        return None, drain
+    gate = pd.DataFrame({
+        f"Voltage {gate_channel}": np.full(len(drain), np.nan),
+        f"Current {gate_channel}": np.full(len(drain), np.nan),
+        f"Timestamp {gate_channel}": np.full(len(drain), np.nan),
+        f"Status {gate_channel}": ["not_acquired_ssr_open"] * len(drain),
+    })
+    return gate, drain
 
 
 def add_derived_fet_columns(data, gate_channel=1, drain_channel=2):
@@ -121,6 +141,7 @@ def execute_program_read_with_software_delay(
     drain_channel,
     current_ranges,
     options,
+    *, float_gate=False,
 ):
     """Execute each write and read separately with a host-side delay."""
     sequence_ids = sorted(config[0] for config in seq_configs[gate_channel])
@@ -182,7 +203,7 @@ def execute_program_read_with_software_delay(
             current_ranges=current_ranges,
             options=options,
         )
-        gate_df, drain_df = read_both_channels(query, gate_channel, drain_channel)
+        gate_df, drain_df = read_fet_channels(query, gate_channel, drain_channel, float_gate=float_gate)
         if gate_df is None or drain_df is None or gate_df.empty or drain_df.empty:
             report_last_error(query)
             raise ValueError(f"Split read {point_index + 1} returned empty PMU data.")

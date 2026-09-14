@@ -43,6 +43,7 @@ from keithley4200.pmu.pmu_tests import (
     validate_segment_arb_configs,
 )
 from keithley4200.pmu.session import PMUSession
+from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
@@ -83,121 +84,6 @@ params = {
 }
 
 
-def _sync_parameter_aliases():
-    global BASE_V, WRITE_POSITIVE_V, WRITE_NEGATIVE_V, READ_V, REVERSE_READ_V
-    global WRITE_POSITIVE_DWELL, WRITE_NEGATIVE_DWELL, READ_DWELL
-    global WRITE_POSITIVE_TRF, WRITE_NEGATIVE_TRF, READ_TRF
-    global WRITE_POSITIVE_IDLE, WRITE_NEGATIVE_IDLE, READ_IDLE
-    global POSITIVE_REPEAT_COUNT, NEGATIVE_REPEAT_COUNT, SEQ_CYCLE_COUNT
-
-    BASE_V = float(params["base_v"])
-    WRITE_POSITIVE_V = float(params["write_positive_v"])
-    WRITE_NEGATIVE_V = float(params["write_negative_v"])
-    READ_V = float(params["read_v"])
-    REVERSE_READ_V = -READ_V
-    WRITE_POSITIVE_DWELL = float(params["write_positive_dwell"])
-    WRITE_NEGATIVE_DWELL = float(params["write_negative_dwell"])
-    READ_DWELL = float(params["read_dwell"])
-    WRITE_POSITIVE_TRF = float(params["write_positive_trf"])
-    WRITE_NEGATIVE_TRF = float(params["write_negative_trf"])
-    READ_TRF = float(params["read_trf"])
-    WRITE_POSITIVE_IDLE = float(params["write_positive_idle"])
-    WRITE_NEGATIVE_IDLE = float(params["write_negative_idle"])
-    READ_IDLE = float(params["read_idle"])
-    POSITIVE_REPEAT_COUNT = int(params["positive_repeat_count"])
-    NEGATIVE_REPEAT_COUNT = int(params["negative_repeat_count"])
-    SEQ_CYCLE_COUNT = int(params["sequence_cycle_count"])
-
-
-_sync_parameter_aliases()
-
-
-
-WRITE_POSITIVE_SEQ_ID = 1
-READ_SEQ_ID = 2
-WRITE_NEGATIVE_SEQ_ID = 3
-REVERSE_READ_SEQ_ID = 4
-
-time_values_write_positive = [WRITE_POSITIVE_TRF, WRITE_POSITIVE_DWELL, WRITE_POSITIVE_TRF, WRITE_POSITIVE_IDLE]
-time_values_read = [READ_TRF, READ_DWELL, READ_TRF, READ_IDLE]
-time_values_write_negative = [WRITE_NEGATIVE_TRF, WRITE_NEGATIVE_DWELL, WRITE_NEGATIVE_TRF, WRITE_NEGATIVE_IDLE]
-
-# Measurement start/stop are absolute offsets in seconds within each segment.
-meas_types_write_positive = [0, 0, 0, 0]
-meas_start_write_positive = [ 0.0, 0.0, 0.0, 0.0]
-meas_stop_write_positive = [0.0, 0.0, 0.0, 0.0]
-
-meas_types_read = [0, 1, 0, 0]
-meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-meas_types_write_negative = [0, 0, 0, 0]
-meas_start_write_negative = [0.0, 0.0, 0.0, 0.0]
-meas_stop_write_negative = [0.0, 0.0, 0.0, 0.0]
-
-ch1_start_v_write_positive = [BASE_V, WRITE_POSITIVE_V, WRITE_POSITIVE_V, BASE_V]
-ch1_stop_v_write_positive = [WRITE_POSITIVE_V, WRITE_POSITIVE_V, BASE_V, BASE_V]
-ch2_start_v_write_positive = [0] * 4
-ch2_stop_v_write_positive = [0] * 4
-
-ch1_start_v_read = [BASE_V, READ_V, READ_V, BASE_V]
-ch1_stop_v_read = [READ_V, READ_V, BASE_V, BASE_V]
-ch1_start_v_reverse_read = [BASE_V, REVERSE_READ_V, REVERSE_READ_V, BASE_V]
-ch1_stop_v_reverse_read = [REVERSE_READ_V, REVERSE_READ_V, BASE_V, BASE_V]
-
-
-ch2_start_v_read = [0] * 4
-ch2_stop_v_read = [0] * 4
-
-ch1_start_v_write_negative = [BASE_V, WRITE_NEGATIVE_V, WRITE_NEGATIVE_V, BASE_V]
-ch1_stop_v_write_negative = [WRITE_NEGATIVE_V, WRITE_NEGATIVE_V, BASE_V, BASE_V]
-ch2_start_v_write_negative = [0] * 4
-ch2_stop_v_write_negative = [0] * 4
-
-ch1_write_positive_config = (WRITE_POSITIVE_SEQ_ID, ch1_start_v_write_positive, ch1_stop_v_write_positive, time_values_write_positive, meas_types_write_positive, meas_start_write_positive, meas_stop_write_positive)
-ch2_write_positive_config = (WRITE_POSITIVE_SEQ_ID, ch2_start_v_write_positive, ch2_stop_v_write_positive, time_values_write_positive, meas_types_write_positive, meas_start_write_positive, meas_stop_write_positive)
-
-ch1_read_config = (READ_SEQ_ID, ch1_start_v_read, ch1_stop_v_read, time_values_read, meas_types_read, meas_start_read, meas_stop_read)
-ch2_read_config = (READ_SEQ_ID, ch2_start_v_read, ch2_stop_v_read, time_values_read, meas_types_read, meas_start_read, meas_stop_read)
-ch1_reverse_read_config = (REVERSE_READ_SEQ_ID, ch1_start_v_reverse_read, ch1_stop_v_reverse_read, time_values_read, meas_types_read, meas_start_read, meas_stop_read)
-ch2_reverse_read_config = (REVERSE_READ_SEQ_ID, ch2_start_v_read, ch2_stop_v_read, time_values_read, meas_types_read, meas_start_read, meas_stop_read)
-
-
-ch1_write_negative_config = (WRITE_NEGATIVE_SEQ_ID, ch1_start_v_write_negative, ch1_stop_v_write_negative, time_values_write_negative, meas_types_write_negative, meas_start_write_negative, meas_stop_write_negative)
-ch2_write_negative_config = (WRITE_NEGATIVE_SEQ_ID, ch2_start_v_write_negative, ch2_stop_v_write_negative, time_values_write_negative, meas_types_write_negative, meas_start_write_negative, meas_stop_write_negative)
-
-seq_configs = {
-    CH1: [ch1_write_positive_config, ch1_read_config, ch1_reverse_read_config, ch1_write_negative_config],
-    CH2: [ch2_write_positive_config, ch2_read_config, ch2_reverse_read_config, ch2_write_negative_config],
-}
-
-# Equivalent to :PMU:SARB:WFM:SEQ:LIST.
-# SEQ_LIST = {
-#     CH1: (
-#         [(3, 1), (2, 1)] * 100
-#     ),
-#     CH2: (
-#         [(3, 1), (2, 1)] * 100
-#     ),
-# }
-
-# SEQ_PLAN = (
-#     [(WRITE_POSITIVE_SEQ_ID, 1), (READ_SEQ_ID, 1), (REVERSE_READ_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT +
-#     [(WRITE_NEGATIVE_SEQ_ID, 1),  (REVERSE_READ_SEQ_ID, 1), (READ_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT +
-#     [(WRITE_POSITIVE_SEQ_ID, 1), (READ_SEQ_ID, 1), (REVERSE_READ_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT +
-#     [(WRITE_NEGATIVE_SEQ_ID, 1), (REVERSE_READ_SEQ_ID, 1), (READ_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT
-# )
-
-
-FIRST_EXPANDED_SEQ_ID = 1
-
-SINGLE_CYCLE_PLAN = (
-    [(WRITE_POSITIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT +
-    [(WRITE_NEGATIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT
-)
-SEQ_PLAN = SINGLE_CYCLE_PLAN * SEQ_CYCLE_COUNT
-
-
 def build_sequence_plan_config(configs, seq_plan, *, seq_id):
     """Flatten a sequence-list plan into one PMU sequence."""
     config_by_id = {config[0]: config for config in configs}
@@ -219,30 +105,6 @@ def build_sequence_plan_config(configs, seq_plan, *, seq_id):
             meas_stop.extend(config[6])
 
     return (seq_id, start_v, stop_v, time_values, meas_types, meas_start, meas_stop)
-
-
-base_seq_configs = seq_configs
-expanded_seq_ids = [FIRST_EXPANDED_SEQ_ID + index for index in range(SEQ_CYCLE_COUNT)]
-ch1_expanded_configs = [
-    build_sequence_plan_config(base_seq_configs[CH1], SINGLE_CYCLE_PLAN, seq_id=seq_id)
-    for seq_id in expanded_seq_ids
-]
-ch2_expanded_configs = [
-    build_sequence_plan_config(base_seq_configs[CH2], SINGLE_CYCLE_PLAN, seq_id=seq_id)
-    for seq_id in expanded_seq_ids
-]
-
-seq_configs = {
-    CH1: ch1_expanded_configs,
-    CH2: ch2_expanded_configs,
-}
-
-
-SEQ_LIST = {
-    CH1: [(seq_id, 1) for seq_id in expanded_seq_ids],
-    CH2: [(seq_id, 1) for seq_id in expanded_seq_ids],
-}
-
 
 def validate_sequence_configs(configs_by_channel, seq_list_by_channel):
     """Catch common parameter edit mistakes before sending configs to the PMU."""
@@ -277,186 +139,6 @@ def validate_sequence_configs(configs_by_channel, seq_list_by_channel):
             raise ValueError(f"CH{channel} SEQ_LIST references missing seq IDs: {missing_seq_ids}")
 
 
-def _rebuild_runtime_config():
-    """Rebuild all pulse arrays and sequence plans after parameter injection."""
-    global time_values_write_positive, time_values_read, time_values_write_negative
-    global meas_start_read, meas_stop_read
-    global ch1_start_v_write_positive, ch1_stop_v_write_positive
-    global ch1_start_v_read, ch1_stop_v_read
-    global ch1_start_v_reverse_read, ch1_stop_v_reverse_read
-    global ch1_start_v_write_negative, ch1_stop_v_write_negative
-    global ch1_write_positive_config, ch2_write_positive_config
-    global ch1_read_config, ch2_read_config
-    global ch1_reverse_read_config, ch2_reverse_read_config
-    global ch1_write_negative_config, ch2_write_negative_config
-    global SINGLE_CYCLE_PLAN, SEQ_PLAN, base_seq_configs, expanded_seq_ids
-    global ch1_expanded_configs, ch2_expanded_configs, seq_configs, SEQ_LIST
-    global ch1_sequence_plan_preview_config, CURRENT_RANGES
-
-    _sync_parameter_aliases()
-    time_values_write_positive = [
-        WRITE_POSITIVE_TRF,
-        WRITE_POSITIVE_DWELL,
-        WRITE_POSITIVE_TRF,
-        WRITE_POSITIVE_IDLE,
-    ]
-    time_values_read = [READ_TRF, READ_DWELL, READ_TRF, READ_IDLE]
-    time_values_write_negative = [
-        WRITE_NEGATIVE_TRF,
-        WRITE_NEGATIVE_DWELL,
-        WRITE_NEGATIVE_TRF,
-        WRITE_NEGATIVE_IDLE,
-    ]
-    meas_start_read = [0.0, READ_DWELL * 0.5, 0.0, 0.0]
-    meas_stop_read = [0.0, READ_DWELL * 0.9, 0.0, 0.0]
-
-    ch1_start_v_write_positive = [BASE_V, WRITE_POSITIVE_V, WRITE_POSITIVE_V, BASE_V]
-    ch1_stop_v_write_positive = [WRITE_POSITIVE_V, WRITE_POSITIVE_V, BASE_V, BASE_V]
-    ch1_start_v_read = [BASE_V, READ_V, READ_V, BASE_V]
-    ch1_stop_v_read = [READ_V, READ_V, BASE_V, BASE_V]
-    ch1_start_v_reverse_read = [BASE_V, REVERSE_READ_V, REVERSE_READ_V, BASE_V]
-    ch1_stop_v_reverse_read = [REVERSE_READ_V, REVERSE_READ_V, BASE_V, BASE_V]
-    ch1_start_v_write_negative = [BASE_V, WRITE_NEGATIVE_V, WRITE_NEGATIVE_V, BASE_V]
-    ch1_stop_v_write_negative = [WRITE_NEGATIVE_V, WRITE_NEGATIVE_V, BASE_V, BASE_V]
-
-    ch1_write_positive_config = (
-        WRITE_POSITIVE_SEQ_ID, ch1_start_v_write_positive, ch1_stop_v_write_positive,
-        time_values_write_positive, meas_types_write_positive,
-        meas_start_write_positive, meas_stop_write_positive,
-    )
-    ch2_write_positive_config = (
-        WRITE_POSITIVE_SEQ_ID, ch2_start_v_write_positive, ch2_stop_v_write_positive,
-        time_values_write_positive, meas_types_write_positive,
-        meas_start_write_positive, meas_stop_write_positive,
-    )
-    ch1_read_config = (
-        READ_SEQ_ID, ch1_start_v_read, ch1_stop_v_read, time_values_read,
-        meas_types_read, meas_start_read, meas_stop_read,
-    )
-    ch2_read_config = (
-        READ_SEQ_ID, ch2_start_v_read, ch2_stop_v_read, time_values_read,
-        meas_types_read, meas_start_read, meas_stop_read,
-    )
-    ch1_reverse_read_config = (
-        REVERSE_READ_SEQ_ID, ch1_start_v_reverse_read, ch1_stop_v_reverse_read,
-        time_values_read, meas_types_read, meas_start_read, meas_stop_read,
-    )
-    ch2_reverse_read_config = (
-        REVERSE_READ_SEQ_ID, ch2_start_v_read, ch2_stop_v_read, time_values_read,
-        meas_types_read, meas_start_read, meas_stop_read,
-    )
-    ch1_write_negative_config = (
-        WRITE_NEGATIVE_SEQ_ID, ch1_start_v_write_negative, ch1_stop_v_write_negative,
-        time_values_write_negative, meas_types_write_negative,
-        meas_start_write_negative, meas_stop_write_negative,
-    )
-    ch2_write_negative_config = (
-        WRITE_NEGATIVE_SEQ_ID, ch2_start_v_write_negative, ch2_stop_v_write_negative,
-        time_values_write_negative, meas_types_write_negative,
-        meas_start_write_negative, meas_stop_write_negative,
-    )
-    base_seq_configs = {
-        CH1: [ch1_write_positive_config, ch1_read_config, ch1_reverse_read_config, ch1_write_negative_config],
-        CH2: [ch2_write_positive_config, ch2_read_config, ch2_reverse_read_config, ch2_write_negative_config],
-    }
-    SINGLE_CYCLE_PLAN = (
-        [(WRITE_POSITIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * POSITIVE_REPEAT_COUNT
-        + [(WRITE_NEGATIVE_SEQ_ID, 1), (READ_SEQ_ID, 1)] * NEGATIVE_REPEAT_COUNT
-    )
-    SEQ_PLAN = SINGLE_CYCLE_PLAN * SEQ_CYCLE_COUNT
-    expanded_seq_ids = [FIRST_EXPANDED_SEQ_ID + index for index in range(SEQ_CYCLE_COUNT)]
-    ch1_expanded_configs = [
-        build_sequence_plan_config(base_seq_configs[CH1], SINGLE_CYCLE_PLAN, seq_id=seq_id)
-        for seq_id in expanded_seq_ids
-    ]
-    ch2_expanded_configs = [
-        build_sequence_plan_config(base_seq_configs[CH2], SINGLE_CYCLE_PLAN, seq_id=seq_id)
-        for seq_id in expanded_seq_ids
-    ]
-    seq_configs = {CH1: ch1_expanded_configs, CH2: ch2_expanded_configs}
-    SEQ_LIST = {
-        CH1: [(seq_id, 1) for seq_id in expanded_seq_ids],
-        CH2: [(seq_id, 1) for seq_id in expanded_seq_ids],
-    }
-    ch1_sequence_plan_preview_config = build_sequence_plan_config(
-        base_seq_configs[CH1], SEQ_PLAN, seq_id=0
-    )
-    CURRENT_RANGES = {
-        CH1: float(CURRENT_RANGES.get(CH1, next(iter(CURRENT_RANGES.values())))),
-        CH2: float(CURRENT_RANGES.get(CH2, next(iter(CURRENT_RANGES.values())))),
-    }
-    validate_segment_arb_configs(seq_configs)
-
-
-_rebuild_runtime_config()
-validate_sequence_configs(seq_configs, SEQ_LIST)
-
-
-def configure_measurement(
-    *,
-    params_override=None,
-    inst=None,
-    channels=None,
-    current_ranges=None,
-    segarb_options=None,
-    save_dir=None,
-    file_stem=None,
-):
-    """Apply one complete workflow configuration and rebuild all sequences."""
-    global INST, CH1, CH2, SAVE_DIR, FILE_STEM, CURRENT_RANGES, SEGARB_OPTIONS
-
-    if params_override is not None:
-        params.clear()
-        params.update(params_override)
-    if inst is not None:
-        INST = inst
-    if channels is not None:
-        CH1, CH2 = tuple(channels)
-    if current_ranges is not None:
-        CURRENT_RANGES = dict(current_ranges)
-    if segarb_options is not None:
-        SEGARB_OPTIONS = dict(segarb_options)
-    if save_dir is not None:
-        SAVE_DIR = Path(save_dir)
-    if file_stem is not None:
-        FILE_STEM = str(file_stem)
-    _rebuild_runtime_config()
-    validate_sequence_configs(seq_configs, SEQ_LIST)
-
-
-def build_sequence_plan_preview_config(configs, seq_plan, *, seq_id=0):
-    """Flatten the SEQ_LIST plan into one config for waveform preview."""
-    config_by_id = {config[0]: config for config in configs}
-    start_v = []
-    stop_v = []
-    time_values = []
-    meas_types = []
-    meas_start = []
-    meas_stop = []
-
-    for plan_seq_id, repeat_count in seq_plan:
-        config = config_by_id[plan_seq_id]
-        for _ in range(repeat_count):
-            start_v.extend(config[1])
-            stop_v.extend(config[2])
-            time_values.extend(config[3])
-            meas_types.extend(config[4])
-            meas_start.extend(config[5])
-            meas_stop.extend(config[6])
-
-    return (seq_id, start_v, stop_v, time_values, meas_types, meas_start, meas_stop)
-
-
-def preview_waveform(output_path=None, *, show=True, title_prefix="FTJ Identical CH1"):
-    """Preview the generated identical-pulse waveform on CH1."""
-    return preview_sequence_configs(
-        [ch1_sequence_plan_preview_config],
-        output_path,
-        title_prefix=title_prefix,
-        show=show,
-    )
-
-
 def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, add_gap=True):
     """Append t-V endpoint pairs for one waveform block."""
     cursor = start_time
@@ -470,21 +152,189 @@ def _extend_trace_points(points, start_v, stop_v, time_values, start_time, *, ad
     return cursor
 
 
-def build_waveform_trace_table():
+def build_waveform(*, parameters=None, channels=None):
+    """Build pulse arrays and execution metadata from this run's parameters."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+
+    base_v = float(parameters["base_v"])
+    write_positive_v = float(parameters["write_positive_v"])
+    write_negative_v = float(parameters["write_negative_v"])
+    read_v = float(parameters["read_v"])
+    reverse_read_v = -read_v
+    write_positive_dwell = float(parameters["write_positive_dwell"])
+    write_negative_dwell = float(parameters["write_negative_dwell"])
+    read_dwell = float(parameters["read_dwell"])
+    write_positive_trf = float(parameters["write_positive_trf"])
+    write_negative_trf = float(parameters["write_negative_trf"])
+    read_trf = float(parameters["read_trf"])
+    write_positive_idle = float(parameters["write_positive_idle"])
+    write_negative_idle = float(parameters["write_negative_idle"])
+    read_idle = float(parameters["read_idle"])
+    positive_repeat_count = int(parameters["positive_repeat_count"])
+    negative_repeat_count = int(parameters["negative_repeat_count"])
+    seq_cycle_count = int(parameters["sequence_cycle_count"])
+    time_values_write_positive = [
+        write_positive_trf,
+        write_positive_dwell,
+        write_positive_trf,
+        write_positive_idle,
+    ]
+    time_values_read = [read_trf, read_dwell, read_trf, read_idle]
+    time_values_write_negative = [
+        write_negative_trf,
+        write_negative_dwell,
+        write_negative_trf,
+        write_negative_idle,
+    ]
+    meas_start_read = [0.0, read_dwell * 0.5, 0.0, 0.0]
+    meas_stop_read = [0.0, read_dwell * 0.9, 0.0, 0.0]
+    ch1_start_v_write_positive = [base_v, write_positive_v, write_positive_v, base_v]
+    ch1_stop_v_write_positive = [write_positive_v, write_positive_v, base_v, base_v]
+    ch1_start_v_read = [base_v, read_v, read_v, base_v]
+    ch1_stop_v_read = [read_v, read_v, base_v, base_v]
+    ch1_start_v_reverse_read = [base_v, reverse_read_v, reverse_read_v, base_v]
+    ch1_stop_v_reverse_read = [reverse_read_v, reverse_read_v, base_v, base_v]
+    ch1_start_v_write_negative = [base_v, write_negative_v, write_negative_v, base_v]
+    ch1_stop_v_write_negative = [write_negative_v, write_negative_v, base_v, base_v]
+    write_positive_seq_id = 1
+    meas_start_write_positive = [0.0, 0.0, 0.0, 0.0]
+    meas_stop_write_positive = [0.0, 0.0, 0.0, 0.0]
+    meas_types_write_positive = [0, 0, 0, 0]
+    ch1_write_positive_config = (
+        write_positive_seq_id, ch1_start_v_write_positive, ch1_stop_v_write_positive,
+        time_values_write_positive, meas_types_write_positive,
+        meas_start_write_positive, meas_stop_write_positive,
+    )
+    ch2_start_v_write_positive = [0] * 4
+    ch2_stop_v_write_positive = [0] * 4
+    ch2_write_positive_config = (
+        write_positive_seq_id, ch2_start_v_write_positive, ch2_stop_v_write_positive,
+        time_values_write_positive, meas_types_write_positive,
+        meas_start_write_positive, meas_stop_write_positive,
+    )
+    read_seq_id = 2
+    meas_types_read = [0, 1, 0, 0]
+    ch1_read_config = (
+        read_seq_id, ch1_start_v_read, ch1_stop_v_read, time_values_read,
+        meas_types_read, meas_start_read, meas_stop_read,
+    )
+    ch2_start_v_read = [0] * 4
+    ch2_stop_v_read = [0] * 4
+    ch2_read_config = (
+        read_seq_id, ch2_start_v_read, ch2_stop_v_read, time_values_read,
+        meas_types_read, meas_start_read, meas_stop_read,
+    )
+    reverse_read_seq_id = 4
+    ch1_reverse_read_config = (
+        reverse_read_seq_id, ch1_start_v_reverse_read, ch1_stop_v_reverse_read,
+        time_values_read, meas_types_read, meas_start_read, meas_stop_read,
+    )
+    ch2_reverse_read_config = (
+        reverse_read_seq_id, ch2_start_v_read, ch2_stop_v_read, time_values_read,
+        meas_types_read, meas_start_read, meas_stop_read,
+    )
+    write_negative_seq_id = 3
+    meas_start_write_negative = [0.0, 0.0, 0.0, 0.0]
+    meas_stop_write_negative = [0.0, 0.0, 0.0, 0.0]
+    meas_types_write_negative = [0, 0, 0, 0]
+    ch1_write_negative_config = (
+        write_negative_seq_id, ch1_start_v_write_negative, ch1_stop_v_write_negative,
+        time_values_write_negative, meas_types_write_negative,
+        meas_start_write_negative, meas_stop_write_negative,
+    )
+    ch2_start_v_write_negative = [0] * 4
+    ch2_stop_v_write_negative = [0] * 4
+    ch2_write_negative_config = (
+        write_negative_seq_id, ch2_start_v_write_negative, ch2_stop_v_write_negative,
+        time_values_write_negative, meas_types_write_negative,
+        meas_start_write_negative, meas_stop_write_negative,
+    )
+    base_seq_configs = {
+        ch1: [ch1_write_positive_config, ch1_read_config, ch1_reverse_read_config, ch1_write_negative_config],
+        ch2: [ch2_write_positive_config, ch2_read_config, ch2_reverse_read_config, ch2_write_negative_config],
+    }
+    single_cycle_plan = (
+        [(write_positive_seq_id, 1), (read_seq_id, 1)] * positive_repeat_count
+        + [(write_negative_seq_id, 1), (read_seq_id, 1)] * negative_repeat_count
+    )
+    seq_plan = single_cycle_plan * seq_cycle_count
+    first_expanded_seq_id = 1
+    expanded_seq_ids = [first_expanded_seq_id + index for index in range(seq_cycle_count)]
+    ch1_expanded_configs = [
+        build_sequence_plan_config(base_seq_configs[ch1], single_cycle_plan, seq_id=seq_id)
+        for seq_id in expanded_seq_ids
+    ]
+    ch2_expanded_configs = [
+        build_sequence_plan_config(base_seq_configs[ch2], single_cycle_plan, seq_id=seq_id)
+        for seq_id in expanded_seq_ids
+    ]
+    seq_configs = {ch1: ch1_expanded_configs, ch2: ch2_expanded_configs}
+    seq_list = {
+        ch1: [(seq_id, 1) for seq_id in expanded_seq_ids],
+        ch2: [(seq_id, 1) for seq_id in expanded_seq_ids],
+    }
+    ch1_sequence_plan_preview_config = build_sequence_plan_config(
+        base_seq_configs[ch1], seq_plan, seq_id=0
+    )
+    validate_segment_arb_configs(seq_configs)
+    return {
+        'read_seq_id': read_seq_id,
+        'reverse_read_seq_id': reverse_read_seq_id,
+        'seq_list': seq_list,
+        'seq_plan': seq_plan,
+        'write_negative_seq_id': write_negative_seq_id,
+        'write_positive_seq_id': write_positive_seq_id,
+        'base_seq_configs': base_seq_configs,
+        'ch1_sequence_plan_preview_config': ch1_sequence_plan_preview_config,
+        'seq_configs': seq_configs,
+    }
+
+
+def preview_waveform(
+    output_path=None,
+    *,
+    show=True,
+    title_prefix='FTJ Identical CH1',
+    channels=None,
+    parameters=None,
+    waveform=None,
+):
+    """Preview the generated identical-pulse waveform on CH1."""
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
+    return preview_sequence_configs(
+        [waveform['ch1_sequence_plan_preview_config']],
+        output_path,
+        title_prefix=title_prefix,
+        show=show,
+    )
+
+
+def build_waveform_trace_table(*, channels=None, parameters=None, waveform=None):
     """Return one wide t-V table for plotting write/read command waveforms."""
-    config_by_id = {config[0]: config for config in base_seq_configs[CH1]}
+    parameters = params if parameters is None else parameters
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    waveform = build_waveform(parameters=parameters, channels=channels) if waveform is None else waveform
+
+    config_by_id = {config[0]: config for config in waveform['base_seq_configs'][ch1]}
     write_points = []
     read_points = []
     reverse_read_points = []
     cursor = 0.0
 
-    for seq_id, repeat_count in SEQ_PLAN:
+    for seq_id, repeat_count in waveform['seq_plan']:
         config = config_by_id[seq_id]
-        if seq_id in (WRITE_POSITIVE_SEQ_ID, WRITE_NEGATIVE_SEQ_ID):
+        if seq_id in (waveform['write_positive_seq_id'], waveform['write_negative_seq_id']):
             points = write_points
-        elif seq_id == READ_SEQ_ID:
+        elif seq_id == waveform['read_seq_id']:
             points = read_points
-        elif seq_id == REVERSE_READ_SEQ_ID:
+        elif seq_id == waveform['reverse_read_seq_id']:
             points = reverse_read_points
         else:
             points = []
@@ -509,43 +359,68 @@ def build_waveform_trace_table():
     return pd.DataFrame({name: pd.Series(values) for name, values in trace_columns.items()})
 
 
-def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
+def run_test(
+    params_override=None,
+    *,
+    save_results=True,
+    save_dir=None,
+    file_stem=None,
+    channels=None,
+    current_ranges=None,
+    inst=None,
+    preview_only=None,
+    save_waveform_preview=None,
+    segarb_options=None,
+):
     """Run the FTJ segARB sequence list and optionally save raw data."""
-    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    parameters = merge_parameters(params, params_override)
+    channels = tuple(channels) if channels is not None else (CH1, CH2)
+    ch1, ch2 = channels
+    current_ranges = dict(current_ranges) if current_ranges is not None else dict(zip(channels, (CURRENT_RANGES[CH1], CURRENT_RANGES[CH2])))
     file_stem = FILE_STEM if file_stem is None else str(file_stem)
-    with PMUSession(INST, channels=(CH1, CH2)) as session:
+    inst = INST if inst is None else inst
+    preview_only = PREVIEW_ONLY if preview_only is None else preview_only
+    save_dir = SAVE_DIR if save_dir is None else Path(save_dir)
+    save_waveform_preview = SAVE_WAVEFORM_PREVIEW if save_waveform_preview is None else save_waveform_preview
+    segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
+    waveform = build_waveform(parameters=parameters, channels=channels)
+
+    if preview_only:
+        return {"preview": preview_waveform(channels=channels, parameters=parameters, waveform=waveform), "output_path": None, "params": dict(parameters), "accepted_current_ranges": {}}
+
+    with PMUSession(inst, channels=(ch1, ch2)) as session:
         query = session.query
         execute_segARB_test(
             query,
-            channels=[CH1, CH2],
-            seq_configs=seq_configs,
-            seq_list=SEQ_LIST,
-            current_ranges=CURRENT_RANGES,
-            options=SEGARB_OPTIONS,
+            channels=[ch1, ch2],
+            seq_configs=waveform['seq_configs'],
+            seq_list=waveform['seq_list'],
+            current_ranges=current_ranges,
+            options=segarb_options,
         )
 
-        df_ch1, df_ch2 = read_both_channels(query, CH1, CH2)
-        power_off_outputs(query, (CH1, CH2))
+        df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
+        power_off_outputs(query, (ch1, ch2))
 
     if df_ch1 is None and df_ch2 is None:
         raise ValueError("No data returned from the FTJ segARB run.")
 
-    waveform_df = build_waveform_trace_table()
+    waveform_df = build_waveform_trace_table(channels=channels, parameters=parameters, waveform=waveform)
     output_path = None
     preview_path = None
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, params["write_positive_v"], "tw" + time_tag(params["write_positive_dwell"])),
+            save_dir, measurement_name(file_stem, parameters["write_positive_v"], "tw" + time_tag(parameters["write_positive_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {
             "saved_at": saved_at(),
-            **params,
-            "inst": INST,
-            "channels": (CH1, CH2),
-            "current_ranges": CURRENT_RANGES,
-            "segarb_options": SEGARB_OPTIONS,
+            **parameters,
+            "inst": inst,
+            "channels": (ch1, ch2),
+            "current_ranges": current_ranges,
+            "segarb_options": segarb_options,
         }
         params_df = pd.DataFrame(
             {"name": saved_params.keys(), "value": map(repr, saved_params.values())}
@@ -559,26 +434,21 @@ def run_ftj_test(*, save_results=True, save_dir=None, file_stem=None):
             waveform_df.to_excel(writer, sheet_name="Waveform", index=False)
             params_df.to_excel(writer, sheet_name="Parameters", index=False)
 
-        if SAVE_WAVEFORM_PREVIEW:
+        if save_waveform_preview:
             preview_path = Path(f"{output_stem}_waveform.png")
-            preview_waveform(preview_path)
+            preview_waveform(preview_path, channels=channels, parameters=parameters, waveform=waveform)
 
-    return {
+    result = {
         "df_ch1": df_ch1,
         "df_ch2": df_ch2,
         "waveform_df": waveform_df,
         "output_path": output_path,
         "preview_path": preview_path,
     }
-
-
-def main():
-    """Run the FTJ segARB sequence list and save raw data."""
-    if PREVIEW_ONLY:
-        preview_waveform()
-        return
-    run_ftj_test()
+    result.update(params=dict(parameters), accepted_current_ranges={})
+    result["settings"] = {"inst": inst, "channels": channels, "segarb_options": segarb_options}
+    return result
 
 
 if __name__ == "__main__":
-    main()
+    run_test()
