@@ -23,7 +23,7 @@ for path in (SRC_ROOT, REPO_ROOT):
         sys.path.insert(0, str(path))
 
 from keithley4200.parameter_defaults import remember_current_ranges
-from keithley4200.output import reserve_summary_stem
+from keithley4200.output import reserve_summary_stem, save_summary_workbook
 from measurements.pmu.fe_cap import PUND_tri, PV2
 
 # =============================================================================
@@ -103,20 +103,6 @@ def make_parameters(base_params, vp, frequency_hz, delay_time_s):
     return effective_params
 
 
-def snapshot_files(directory):
-    """Return the files currently present in a test output directory."""
-    directory = Path(directory)
-    if not directory.exists():
-        return set()
-    return {path.resolve() for path in directory.iterdir() if path.is_file()}
-
-
-def save_live_summary(rows, summary_csv):
-    """Persist sweep progress after every attempted test."""
-    SAVE_ROOT.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(summary_csv, index=False)
-
-
 def run_one_test(
     module,
     test_name,
@@ -135,7 +121,6 @@ def run_one_test(
     accepted_ranges = {}
 
     start_time = datetime.now()
-    before_files = snapshot_files(save_dir)
     print(
         f"[{run_index}/{total_runs}] {test_name}: "
         f"Vp={vp:g} V, f={frequency_hz:g} Hz, "
@@ -164,8 +149,6 @@ def run_one_test(
         "PV2_BASE_PARAMS" if test_name == "PV2" else "PUND_BASE_PARAMS",
     )
     end_time = datetime.now()
-    after_files = snapshot_files(save_dir)
-    new_files = sorted(str(path) for path in after_files - before_files)
     return {
         "accepted_current_ranges": dict(accepted_ranges),
         "run_index": run_index,
@@ -187,13 +170,12 @@ def run_one_test(
         "start_time": start_time,
         "end_time": end_time,
         "duration_s": (end_time - start_time).total_seconds(),
-        "output_files": " | ".join(new_files),
         "error": error_text,
     }
 
 
 def run_map():
-    """Run the configured Cartesian map and save live/final summaries."""
+    """Run the configured Cartesian map and update one summary workbook."""
     SAVE_ROOT.mkdir(parents=True, exist_ok=True)
     tests = []
     if RUN_PV2:
@@ -210,7 +192,7 @@ def run_map():
     )
     total_runs = len(sweep_points) * len(tests)
     summary_stem, run_time = reserve_summary_stem(SAVE_ROOT, "map_summary")
-    summary_csv = Path(f"{summary_stem}_live.csv")
+    summary_path = Path(f"{summary_stem}.xlsx")
     rows = []
     interrupted = False
     run_index = 0
@@ -232,7 +214,7 @@ def run_map():
                 )
                 row["time"] = run_time
                 rows.append(row)
-                save_live_summary(rows, summary_csv)
+                save_summary_workbook(rows, summary_path)
                 if row["status"] != "ok" and STOP_ON_ERROR:
                     raise RuntimeError(
                         f"{test_name} failed at Vp={vp:g} V, "
@@ -245,10 +227,8 @@ def run_map():
         print(f"Sweep interrupted after {run_index}/{total_runs} runs.")
     finally:
         if rows:
-            save_live_summary(rows, summary_csv)
-            final_path = Path(f"{summary_stem}.xlsx")
-            pd.DataFrame(rows).to_excel(final_path, index=False)
-            print(f"Saved map summary to {final_path}")
+            save_summary_workbook(rows, summary_path)
+            print(f"Saved map summary to {summary_path}")
 
     success_count = sum(row["status"] == "ok" for row in rows)
     status = "interrupted" if interrupted else "complete"

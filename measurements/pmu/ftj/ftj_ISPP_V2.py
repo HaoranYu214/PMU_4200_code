@@ -15,7 +15,7 @@ for path in (SRC_ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at
+from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at, voltage_tag
 from keithley4200.pmu.data_processing import read_both_channels
 from keithley4200.pmu.pmu_tests import (
     MAX_SEGMENTS_PER_SEQUENCE,
@@ -299,7 +299,10 @@ def run_test(
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, parameters["positive_stop_v"], "tw" + time_tag(parameters["write_dwell"])),
+            save_dir, measurement_name(file_stem, None,
+                "Vp" + voltage_tag(parameters["positive_stop_v"]),
+                "Vn" + voltage_tag(parameters["negative_stop_v"]),
+                "tw" + time_tag(parameters["write_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {

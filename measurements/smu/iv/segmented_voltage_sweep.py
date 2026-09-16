@@ -40,9 +40,9 @@ SMU_CONNECTIONS = {
 }
 
 
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\10-09-2026\04A1_2700_1200_300\R10_1\IV")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\14-09-2026\04A1_2700_1200_300\L30_3")
 
-DEVICE_AREA_CM2 = (20e-4) ** 2
+DEVICE_AREA_CM2 = (30e-4) ** 2
 # DEVICE_AREA_CM2 = (15*1e-4)**2*3.14
 
 # Generic device-check loop. Package/orchestration files may override these

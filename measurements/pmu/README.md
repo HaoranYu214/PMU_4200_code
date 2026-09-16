@@ -54,7 +54,7 @@ Only accepted ranges are remembered; failed or unstable acquisitions do not pers
 
 ### API boundaries
 
-The shared structure is file defaults → waveform construction → session/execution → readout/analysis → saved parameters. It does not mean every entry has identical keyword names or workbook sheets. FTJ fixed ranges use current_ranges; FET also exposes gate_current_range/drain_current_range in params; PV/PUND uses Irange1/Irange2. Analysis sheets remain specific to each experiment. The endurance entry keeps its own fixed-range PV/PUND readback protocol and does not call standalone run_test.
+The shared structure is file defaults → waveform construction → session/execution → readout/analysis → saved parameters. It does not mean every entry has identical keyword names or workbook sheets. FTJ fixed ranges use current_ranges; FET also exposes gate_current_range/drain_current_range in params; PV/PUND uses Irange1/Irange2. Analysis sheets remain specific to each experiment. Endurance now exposes run_test with three parameter-override dictionaries. Its local PV2/triangular PUND waveforms match the standalone entries, and it reuses their analysis with fixed-range acquisitions.
 
 A leaf PV/PUND entry persists accepted ranges immediately after acquisition. Its workflow receives those ranges only when run_test returns successfully. If later analysis or saving raises, the leaf defaults may already be updated while workflow defaults retain their previous values.
 
@@ -111,6 +111,6 @@ PV2、三角 PUND、方波 PUND 在自动量程检查接受后，将 Irange1/Ira
 
 ### 接口边界
 
-共同结构是“文件默认参数 → 构建波形 → 会话与执行 → 读回/分析 → 保存参数”，不代表每个入口的关键字或工作表完全同名。FTJ 固定档通过 current_ranges 传入；FET 的 params 还提供 gate_current_range/drain_current_range；PV/PUND 使用 Irange1/Irange2。分析工作表按实验需要保留。endurance 使用自己的固定档 PV/PUND 读回协议，不调用独立测试的 run_test。
+共同结构是“文件默认参数 → 构建波形 → 会话与执行 → 读回/分析 → 保存参数”，不代表每个入口的关键字或工作表完全同名。FTJ 固定档通过 current_ranges 传入；FET 的 params 还提供 gate_current_range/drain_current_range；PV/PUND 使用 Irange1/Irange2。分析工作表按实验需要保留。endurance 现在提供 run_test 和三组参数覆盖入口；本地 PV2/三角 PUND 波形与独立测试一致，固定量程采集并复用其分析。
 
 独立 PV/PUND 在采集接受量程后立即回写；workflow 要等 run_test 成功返回才收到量程。因此后续分析或保存抛错时，独立文件可能已更新，而 workflow 默认量程仍是旧值。

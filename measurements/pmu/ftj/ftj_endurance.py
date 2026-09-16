@@ -3,7 +3,7 @@
 
 The target measurement owns its waveform. This runner configures that module,
 runs it repeatedly, and saves a live summary after every attempt. Keeping each
-iteration as a separate PMU execution avoids building an unbounded Segment Arb
+iteration as a separate target run avoids building an unbounded Segment Arb
 sequence while still allowing long endurance experiments.
 """
 
@@ -27,13 +27,24 @@ for path in (SRC_ROOT, REPO_ROOT):
         sys.path.insert(0, str(path))
 
 
-from keithley4200.output import prepare_output_dir, reserve_summary_stem
+from keithley4200.output import prepare_output_dir, reserve_summary_stem, save_summary_workbook
 
 # =============================================================================
 # USER CONFIGURATION
 # =============================================================================
 
-TARGET_MODULE_NAME = "measurements.pmu.ftj.ftj_RV2"
+# Select ONE target by uncommenting its assignment. Each outer run executes
+# the target's complete plan, including its own repeat counts.
+# TARGET_MODULE_NAME = "measurements.pmu.ftj.ftj_RV2"
+TARGET_MODULE_NAME = "measurements.pmu.ftj.ftj_Identical_V1"
+# TARGET_MODULE_NAME = "measurements.pmu.ftj.ftj_Identical_V2"
+
+# Empty means use the selected test file's params. Only use keys belonging
+# to that target; changing targets does not translate parameter names.
+# Identical V1: sequence_cycle_count repeats the packed SARB plan.
+# Identical V2: plan_repeat_count repeats separate executions and Python waits.
+# Both accept write_positive_v, write_negative_v, read_v,
+# positive_repeat_count, and negative_repeat_count.
 TARGET_PARAM_OVERRIDES = {}
 
 # Leave these as None to retain the target module's own settings.
@@ -43,37 +54,33 @@ TARGET_CURRENT_RANGES = None
 TARGET_SEGARB_OPTIONS = None
 
 SAVE_DIR = Path(
-    r"C:\Users\P317151\Documents\data\06-07-2026\03C6\L40um6\endurance"
+    r"C:\Users\P317151\Documents\data\14-09-2026\04A1_2700_1200_300\L30_2\FTJ\endurance6V"
 )
+# Number of complete target runs, not individual write-pulse pairs.
 LOOP_COUNT = 1000
 SAVE_EVERY_RUN = True
 STOP_ON_ERROR = True
 FILE_STEM_PREFIX = "ftj_endurance"
 
 
-def load_ftj_module(module_name=TARGET_MODULE_NAME):
+def load_ftj_module(module_name=None):
     """Import one maintained FTJ measurement module without opening VISA."""
+    module_name = TARGET_MODULE_NAME if module_name is None else module_name
     module = importlib.import_module(module_name)
     if not callable(getattr(module, "run_test", None)):
         raise TypeError(f"{module_name} does not provide run_test(...).")
     return module
 
 
-def make_summary_row(run_index, status, start_time, end_time, output_path, error_text):
+def make_summary_row(run_index, status, start_time, end_time, error_text):
     return {
         "run_index": run_index,
         "status": status,
         "start_time": start_time,
         "end_time": end_time,
         "duration_s": (end_time - start_time).total_seconds(),
-        "output_path": str(output_path) if output_path else "",
         "error": error_text,
     }
-
-
-def save_live_summary(summary_rows, summary_csv, run_time):
-    """Persist progress after every attempt so an interrupted run is auditable."""
-    pd.DataFrame(summary_rows).assign(time=run_time).to_csv(summary_csv, index=False)
 
 
 def run_endurance(
@@ -111,7 +118,7 @@ def run_endurance(
     module = load_ftj_module(module_name) if module is None else module
     save_dir = prepare_output_dir(save_dir)
     summary_stem, run_time = reserve_summary_stem(save_dir, "endurance_summary")
-    summary_csv = Path(f"{summary_stem}_live.csv")
+    summary_path = Path(f"{summary_stem}.xlsx")
     configured_params = dict(module.params)
     configured_params.update(TARGET_PARAM_OVERRIDES if param_overrides is None else param_overrides)
 
@@ -122,11 +129,10 @@ def run_endurance(
             f"FTJ endurance run {run_index}/{loop_count} started at "
             f"{start_time:%Y-%m-%d %H:%M:%S}"
         )
-        output_path = None
         error_text = ""
         status = "ok"
         try:
-            result = module.run_test(
+            module.run_test(
                 params_override=configured_params, inst=inst, channels=channels,
                 current_ranges=current_ranges, segarb_options=segarb_options,
                 preview_only=False,
@@ -134,7 +140,6 @@ def run_endurance(
                 save_dir=save_dir,
                 file_stem=file_stem_prefix,
             )
-            output_path = result.get("output_path")
         except KeyboardInterrupt:
             end_time = datetime.now()
             summary_rows.append(
@@ -143,11 +148,10 @@ def run_endurance(
                     "interrupted",
                     start_time,
                     end_time,
-                    output_path,
                     "KeyboardInterrupt",
                 )
             )
-            save_live_summary(summary_rows, summary_csv, run_time)
+            save_summary_workbook(pd.DataFrame(summary_rows).assign(time=run_time), summary_path)
             raise
         except Exception:
             status = "failed"
@@ -157,10 +161,10 @@ def run_endurance(
         end_time = datetime.now()
         summary_rows.append(
             make_summary_row(
-                run_index, status, start_time, end_time, output_path, error_text
+                run_index, status, start_time, end_time, error_text
             )
         )
-        save_live_summary(summary_rows, summary_csv, run_time)
+        save_summary_workbook(pd.DataFrame(summary_rows).assign(time=run_time), summary_path)
         print(
             f"FTJ endurance run {run_index}/{loop_count} finished "
             f"with status={status}"
@@ -169,12 +173,10 @@ def run_endurance(
             break
 
     summary_df = pd.DataFrame(summary_rows).assign(time=run_time)
-    summary_path = Path(f"{summary_stem}.xlsx")
-    summary_df.to_excel(summary_path, index=False)
+    save_summary_workbook(summary_df, summary_path)
     print(f"Saved FTJ endurance summary to {summary_path}")
     return {
         "summary_df": summary_df,
-        "summary_csv": summary_csv,
         "summary_path": summary_path,
     }
 

@@ -97,7 +97,6 @@ def main():
         frame = pd.read_excel(result_path, sheet_name="FET_Data")
         frame.insert(0, "RequestedDelay_s", delay)
         frame.insert(1, "DelayRunIndex", index)
-        frame["SourceWorkbook"] = Path(result_path).name
         rows.append(frame)
 
     summary = pd.concat(rows, ignore_index=True)

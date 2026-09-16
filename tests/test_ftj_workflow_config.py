@@ -142,6 +142,30 @@ class FtjWorkflowConfigTests(unittest.TestCase):
             self.assertEqual(kwargs['parameters'], ftj_package1.FTJ_TESTS[name]['params'])
         show.assert_called_once_with()
 
+    def test_endurance_selects_both_identical_targets_and_passes_overrides(self):
+        for target, repeat_key in ((ftj_Identical_V1, 'sequence_cycle_count'),
+                                   (ftj_Identical_V2, 'plan_repeat_count')):
+            before = deepcopy(target.params)
+            overrides = dict(write_positive_v=2.5, write_negative_v=-4.0,
+                             positive_repeat_count=2, negative_repeat_count=3)
+            overrides[repeat_key] = 1
+            with self.subTest(target=target.__name__), tempfile.TemporaryDirectory() as tmp:
+                with mock.patch.object(ftj_endurance, 'TARGET_MODULE_NAME', target.__name__), \
+                     mock.patch.object(target, 'run_test', return_value={}) as execute:
+                    self.assertIs(ftj_endurance.load_ftj_module(), target)
+                    result = ftj_endurance.run_endurance(
+                        param_overrides=overrides, loop_count=2, save_dir=tmp)
+                self.assertEqual(execute.call_count, 2)
+                for call in execute.call_args_list:
+                    settings = call.kwargs
+                    self.assertEqual(settings['params_override'], dict(before, **overrides))
+                    self.assertFalse(settings['preview_only'])
+                    self.assertTrue(settings['save_results'])
+                    waveform = target.build_waveform(parameters=settings['params_override'])
+                    assert_configs_are_pmu_valid(self, waveform['seq_configs'])
+                self.assertEqual(result['summary_df']['status'].tolist(), ['ok', 'ok'])
+                self.assertEqual(target.params, before)
+
     def test_endurance_merges_overrides_and_uses_runtime_save_path(self):
         calls = []
         fake = SimpleNamespace(params={'vp': 4.0, 'read_v': -1.0},

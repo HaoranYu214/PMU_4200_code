@@ -355,6 +355,7 @@ def install_dry_run_hooks(no_save=False):
         # Name previews must not consume real acquisition numbers in no-save mode.
         output.reserve_output_stem = lambda directory, name: Path(directory) / f"{name}_r001"
         output.prepare_output_dir = lambda directory: Path(directory)
+        output.save_summary_workbook = lambda rows, path, **kwargs: print(f"# SKIP_SAVE summary -> {path}")
         data_processing.save_channels_separate_excel = fake_save_channels_separate_excel
         data_processing.save_csv = fake_save_csv
         data_processing.save_excel = fake_save_excel

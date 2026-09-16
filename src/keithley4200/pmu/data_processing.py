@@ -406,3 +406,51 @@ def generate_mock_dual(n_points=2000, duration=1e-3):
         "Voltage 1": v1, "Current 1": i1, "Timestamp 1": t, "Status 1": s1,
         "Voltage 2": v2, "Current 2": i2, "Timestamp 2": t, "Status 2": s2,
     })
+
+
+def remanent_polarization(voltage, polarization, *, zero_endpoint=False):
+    """Return signed (Pr_positive, Pr_negative) at zero applied voltage.
+
+    Follow the return branch after each positive/negative voltage extremum,
+    interpolating between adjacent finite samples that bracket 0 V. Values
+    retain the polarization input units (normally uC/cm^2). Do not substitute
+    peak polarization or a value at the bias offset. Missing crossings return
+    NaN; non-finite gaps are never bridged. If the programmed final voltage is
+    exactly zero, zero_endpoint=True permits linear extrapolation from the
+    last two finite adjacent samples by at most one voltage sample interval.
+    This accounts for acquisition windows that omit the exact endpoint.
+    Input is one loop or return branch, not multiple concatenated cycles.
+    """
+    voltage = np.asarray(voltage, dtype=float)
+    polarization = np.asarray(polarization, dtype=float)
+    if voltage.ndim != 1 or polarization.ndim != 1 or voltage.shape != polarization.shape:
+        raise ValueError("Voltage and polarization must be equal-length one-dimensional arrays.")
+    if len(voltage) < 2 or not np.isfinite(voltage).any():
+        return float("nan"), float("nan")
+    finite_voltage = np.isfinite(voltage)
+    positive_peak = int(np.argmax(np.where(finite_voltage, voltage, -np.inf)))
+    negative_peak = int(np.argmin(np.where(finite_voltage, voltage, np.inf)))
+
+    def crossing(start, stop, sign):
+        if sign * voltage[start] <= 0:
+            return float("nan")
+        for index in range(start, stop):
+            v0, v1 = voltage[index:index + 2]
+            p0, p1 = polarization[index:index + 2]
+            if not np.isfinite([v0, v1, p0, p1]).all():
+                continue
+            if sign * v0 > 0 and sign * v1 <= 0:
+                return float(p0 + (p1 - p0) * (-v0) / (v1 - v0))
+        if zero_endpoint and stop == len(voltage) - 1:
+            v0, v1 = voltage[-2:]
+            p0, p1 = polarization[-2:]
+            if (np.isfinite([v0, v1, p0, p1]).all()
+                    and sign * v0 > sign * v1 > 0
+                    and abs(v1) <= abs(v1 - v0) * (1 + 1e-12)):
+                return float(p0 + (p1 - p0) * (-v0) / (v1 - v0))
+        return float("nan")
+
+    positive_stop = negative_peak if negative_peak > positive_peak else len(voltage) - 1
+    negative_stop = positive_peak if positive_peak > negative_peak else len(voltage) - 1
+    return (crossing(positive_peak, positive_stop, 1),
+            crossing(negative_peak, negative_stop, -1))

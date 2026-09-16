@@ -1,6 +1,6 @@
 """Short, grouped output names and atomic reservations for measurement runs.
 
-Reserve ONCE per acquisition, then append .xlsx / _i1.png / ... to that stem.
+Reserve ONCE per acquisition, then append .xlsx / _i2.png / ... to that stem.
 Reservations are permanent so an interrupted run's number is never reused.
 """
 
@@ -23,16 +23,16 @@ def saved_at():
 
 
 def voltage_tag(value):
-    """Readable voltage label; two integer digits and six fixed decimals.
+    """Readable voltage label; two integer digits and two fixed decimals.
 
-    Fixed precision keeps sub-10-mV settings in positive numeric order. Signed
+    Labels round to 0.01 V; equal rounded labels use separate run numbers. Signed
     labels retain polarity; alphabetical order is not numeric order for negatives.
     The full precision setting remains in the workbook's Parameters sheet.
     """
     value = float(value)
     if not math.isfinite(value):
         raise ValueError("Voltage must be finite.")
-    digits = f"{abs(value):.6f}"
+    digits = f"{abs(value):.2f}"
     integer, _, fraction = digits.partition(".")
     sign = "-" if value < 0 and float(digits) != 0 else ""
     return f"{sign}{integer.zfill(2)}.{fraction}V"
@@ -121,11 +121,36 @@ def prepare_output_dir(directory):
 
 
 def reserve_summary_stem(directory, label="summary"):
-    """Reserve live/final summary names and return their shared time parameter.
+    """Reserve one summary workbook name and return their shared time parameter.
 
-    The timestamp is captured once per invocation. The usual atomic run suffix
+    The timestamp is captured once per invocation; update the same workbook
+    throughout the run. The usual atomic run suffix
     also protects separate processes that start within the same second.
     """
     run_time = saved_at()
     stamp = datetime.fromisoformat(run_time).strftime("%Y%m%d_%H%M%S")
     return reserve_output_stem(directory, f"{label}_{stamp}"), run_time
+
+
+def save_summary_workbook(rows, path, *, sheet_name="Summary"):
+    """Update one Excel summary atomically, retaining its previous good version.
+
+    Use the same reserved path after each stage and at completion; no CSV
+    companion is created. Callers supply summary fields without output paths.
+    """
+    import os
+    import tempfile
+    import pandas as pd
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
+    handle, temporary = tempfile.mkstemp(prefix=f".{path.stem}_", suffix=".xlsx", dir=path.parent)
+    os.close(handle)
+    try:
+        frame.to_excel(temporary, sheet_name=sheet_name, index=False, engine="openpyxl")
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return path

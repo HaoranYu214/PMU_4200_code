@@ -21,13 +21,21 @@ from keithley4200.output import (
 
 class OutputNamingTests(unittest.TestCase):
     def test_voltage_order_and_sub_microsecond_labels(self):
-        values = [3, 3.005, 3.01, 3.125, 3.5, 4, 9.5, 10, 40]
+        values = [3, 3.01, 3.02, 3.12, 3.5, 4, 9.5, 10, 40]
         labels = [voltage_tag(value) for value in values]
         self.assertEqual(labels, sorted(labels))
-        self.assertEqual(labels[:3], ["03.000000V", "03.005000V", "03.010000V"])
-        self.assertEqual(voltage_tag(-3.5), "-03.500000V")
-        self.assertEqual(voltage_tag(3.125), "03.125000V")
+        self.assertEqual(labels[:3], ["03.00V", "03.01V", "03.02V"])
+        self.assertEqual(voltage_tag(-3.5), "-03.50V")
+        self.assertEqual(voltage_tag(3.126), "03.13V")
         self.assertEqual(time_tag(1e-7), "0.1us")
+
+    def test_rounded_voltages_reserve_distinct_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = reserve_output_stem(tmp, measurement_name("PV2", 3.001))
+            second = reserve_output_stem(tmp, measurement_name("PV2", 3.004))
+            self.assertEqual(first.name, "PV2_03.00V_r001")
+            self.assertEqual(second.name, "PV2_03.00V_r002")
+        self.assertEqual(voltage_tag(-0.001), "00.00V")
 
     def test_old_companion_files_and_failed_reservations_are_not_reused(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -100,7 +108,7 @@ class OutputNamingTests(unittest.TestCase):
             with self.subTest(module=module_name), tempfile.TemporaryDirectory() as tmp:
                 with mock.patch.object(module, "SAVE_DIR", Path(tmp)), mock.patch.object(module, "params", parameters):
                     stem = module.build_fname_base()
-                    self.assertTrue(stem.name.startswith(f"{label}_03.500000V_tr250us_td1000us"))
+                    self.assertTrue(stem.name.startswith(f"{label}_03.50V_tr250us_td1000us"))
                     workbook = Path(f"{stem}.xlsx")
                     image = Path(f"{stem}_i1.png")
                     workbook.write_bytes(b"original workbook")
@@ -132,7 +140,7 @@ class OutputNamingTests(unittest.TestCase):
         def fake_test(module, test_name, base_params, save_dir, vp, frequency, delay, index, total):
             stem = reserve_output_stem(save_dir, measurement_name("PV2", vp))
             Path(f"{stem}.xlsx").write_bytes(b"map data")
-            return {"status": "ok", "output_files": str(stem) + ".xlsx"}
+            return {"status": "ok"}
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -151,14 +159,12 @@ class OutputNamingTests(unittest.TestCase):
             self.assertEqual({p.name for p in base.iterdir() if p.is_dir()}, {"PV2", ".reservations"})
             for summary in summaries:
                 live = summary.with_name(summary.stem + "_live.csv")
-                self.assertTrue(live.is_file())
+                self.assertFalse(live.exists())
                 rows = pd.read_excel(summary)
-                live_rows = pd.read_csv(live)
-                self.assertEqual(rows["time"].tolist(), live_rows["time"].tolist())
                 self.assertEqual(rows["time"].nunique(), 1)
                 time_text = datetime.fromisoformat(rows["time"].iloc[0]).strftime("%Y%m%d_%H%M%S")
                 self.assertIn(time_text, summary.name)
-                self.assertTrue(all(Path(name).is_file() for name in rows["output_files"]))
+                self.assertNotIn("output_files", rows.columns)
 
     def test_package_failure_does_not_change_configured_directories(self):
         from workflows import package1

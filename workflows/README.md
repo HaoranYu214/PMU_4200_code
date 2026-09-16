@@ -22,6 +22,8 @@ Parameter source: [manual limits and mode reference (Chinese)](../reference/manu
 
 Parameter API: [standalone and workflow configuration](../measurements/pmu/README.md#standalone-and-workflow-configuration).
 
+Summary output uses one Excel workbook per invocation, updated as progress is recorded. No duplicate live CSV or output-path columns are saved; runtime return values can still provide paths to callers.
+
 ## 中文
 
 ### 多步测量工作流
@@ -42,3 +44,5 @@ map 中 frequency 转换为 rise_time=1/(4f)，仅表示三角波的标称频率
 参数依据：[手册限制与模式速查](../reference/manuals/PARAMETER_LIMITS.md)。
 
 参数接口：[独立运行与工作流配置](../measurements/pmu/README.md#独立运行与工作流配置)。
+
+每轮只保存一份 Excel 汇总，随进度更新，不再保存重复的实时 CSV 或输出路径列；函数返回值仍可向调用方提供运行时路径。

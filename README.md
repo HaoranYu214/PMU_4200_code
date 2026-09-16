@@ -34,19 +34,19 @@ preview helpers are hardware-free.
 Automatic measurement outputs use short names, with voltage before timing:
 
 ```text
-PV2_03.000000V_tr250us_td1000us_r001.xlsx
-PV2_03.000000V_tr250us_td1000us_r001_i1.png
-PV2_03.000000V_tr250us_td1000us_r001_i2.png
-PV2_03.000000V_tr250us_td1000us_r002.xlsx
-PUNDtri_03.500000V_tr250us_td1000us_r001.xlsx
-PUND_03.500000V_tr250us_td1000us_tw50us_r001.xlsx
+PV2_03.00V_tr250us_td1000us_r001.xlsx
+PV2_03.00V_tr250us_td1000us_r001_i2.png
+PV2_03.00V_tr250us_td1000us_r002.xlsx
+PUNDtri_03.50V_tr250us_td1000us_r001.xlsx
+PUND_03.50V_tr250us_td1000us_tw50us_r001.xlsx
 ```
 
 - `tr`: rise time; `td`: delay; `tw`: dwell/pulse width. Times use microseconds,
   including fractions such as `0.1us`. PV2 and PUND always include delay.
-- Voltage uses at least two integer digits and six fixed decimal places, so
-  positive labels below 100 V sort as `03.000000V, 03.005000V, 03.010000V`.
-  Negative bias labels retain the minus sign; alphabetical ordering is not a
+- Voltage uses at least two integer digits and two fixed decimal places, so
+  positive labels below 100 V sort as `03.00V, 03.01V, 03.02V`.
+  Labels round to 0.01 V; settings that round to the same label receive different run numbers.
+  Full precision remains in saved parameters. Negative bias labels retain the minus sign; alphabetical ordering is not a
   signed numerical sort, and magnitudes of 100 V or more need numeric sorting.
 - Each acquisition reserves the first available `r001, r002, ...` for the entire
   workbook/image group. Existing companions count as occupied, even if the
@@ -58,14 +58,18 @@ PUND_03.500000V_tr250us_td1000us_tw50us_r001.xlsx
 - Standalone measurements and batch workflows use their configured directories
   directly. No automatic time subdirectory is added; existing test/stage folders
   are retained. Summary outputs include a per-invocation time, for example
-  `map_summary_20260911_103449_r001.xlsx` and its matching `_live.csv`.
-  A `time` column records the same ISO timestamp in the summary. Live updates
-  reuse that run's CSV; a later invocation reserves a new summary name. The
-  numeric suffix also prevents collisions between same-second runs.
+  `map_summary_20260911_103449_r001.xlsx`. The same Excel summary is updated
+  after each stage and at completion; no duplicate CSV is produced. Updates
+  replace the previous workbook only after the new file has been written.
+  A `time` column records the same ISO timestamp. Output paths are omitted
+  so summaries remain useful after moving the data. A later invocation
+  reserves a new summary name, including for same-second runs.
 - Existing data is not renamed. Script/module names and measurement waveforms
   are unchanged. Explicit low-level save/preview functions still honor the exact
   path supplied by their caller; automatic naming belongs at the acquisition
   entry point.
+
+PV/PUND polarization figures show I2 only; raw I1 data and I1 analysis tables remain saved.
 
 The common helpers live in `src/keithley4200/output.py`. Reserve a stem once with
 `reserve_output_stem(directory, measurement_name(...))`, then append extensions
@@ -125,14 +129,16 @@ Parameter source: [manual limits and mode reference (Chinese)](reference/manuals
 
 ## 保存结果
 
-文件名优先显示电压，再显示时间参数，例如 PV2_03.000000V_tr250us_td1000us_r001.xlsx；同次测量的图形沿用同一文件主名并加 _i1.png 等后缀。下一次同名测量使用 r002。
+文件名优先显示电压，再显示时间参数，例如 PV2_03.00V_tr250us_td1000us_r001.xlsx；同次测量的图形沿用同一文件主名并加 _i2.png 等后缀。下一次同名测量使用 r002。
 
 - tr 为上升时间，td 为等待时间，tw 为平台或脉宽。时间用微秒表示，允许 0.1us 等小数；PV2/PUND 始终包含 delay。
-- 电压至少两位整数、固定六位小数，因此 100 V 以下正电压可按名称正确排序。负电压保留负号；负数和 100 V 以上数值需按数值排序。
+- 电压至少两位整数、固定两位小数，因此 100 V 以下正电压可按名称正确排序。标签舍入至 0.01 V，舍入后同名的测试用不同编号区分，参数表保留完整数值。负电压保留负号；负数和 100 V 以上数值需按数值排序。
 - 每次采集为整组表格与图形占用首个空闲 r001/r002 编号。即使表格不存在，已有配套图形也视为占用。包含参数的表格保留完整参数和 ISO 格式 saved_at，文件名不能替代参数记录。
 - .reservations/ 使用独占文件创建协调多个进程，应随数据目录保留。失败或中断可能有意留下空号。
-- 独立测试和工作流直接使用设置的目录，不再额外增加时间目录，已有测试/阶段目录保留。汇总名仍包含本轮时间，例如 map_summary_20260911_103449_r001.xlsx，配套 _live.csv 持续更新；time 列记录同一 ISO 时间。下一轮占用新编号，同秒运行也不覆盖。
+- 独立测试和工作流直接使用设置的目录，不再额外增加时间目录，已有测试/阶段目录保留。汇总名仍包含本轮时间，例如 map_summary_20260911_103449_r001.xlsx，每个阶段及结束时更新同一 Excel，不再生成重复 CSV；新工作簿写好后才替换上一版。time 列记录同一 ISO 时间，不保存输出路径，便于移动数据。下一轮占用新编号，同秒运行也不覆盖。
 - 已有数据不重命名。底层保存/预览函数仍使用调用者给定的精确路径；自动命名在采集入口完成。
+
+PV/PUND 极化图只画 I2；I1 原始数据和分析表仍保存。
 
 公共命名在 src/keithley4200/output.py：调用 reserve_output_stem(directory, measurement_name(...)) 一次，整组输出共享返回的主名。
 

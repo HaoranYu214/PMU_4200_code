@@ -29,24 +29,24 @@ from keithley4200.parameter_defaults import remember_current_ranges
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
 params = dict(
-    rise_time=2.5e-5,
-    delay_time=2.5e-5,
+    rise_time=2.5e-4,
+    delay_time=1e-3,
     Vp=4.5,
     offset=0,
-    area_cm2=(10*1e-4)**2*3.14,
+    # area_cm2=(10*1e-4)**2*3.14,
     # area_cm2=4e-6,
-    # area_cm2=(20*1e-4)**2,
-    Irange1=1e-4,
-    Irange2=1e-4,
+    area_cm2=(30*1e-4)**2,
+    Irange1=1e-05,
+    Irange2=1e-05,
 )
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1e3,
+    "LOAD_RESISTANCE": 1e6,
     "ENABLE_LLEC": False,
 }
 PREVIEW_ONLY = True
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\25-08-2026\03C4_hZO_2700_800\R10_1")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\14-09-2026\04A1_2700_1200_300\L30_3")
 
 
 def _split_complete_loops(time, voltage, current):
@@ -403,32 +403,10 @@ def run_test(
         fig_i2.savefig(i2_plot_path, dpi=300)
         plt.close(fig_i2)
 
-        fig_i1, ax_i1 = plt.subplots(figsize=(6, 5))
-        ax_i1.plot(
-            data["i1_delay"]["Voltage"],
-            data["i1_delay"]["Polarization"],
-            "r-",
-            label=f"Delay {parameters['delay_time'] * 1e3:g} ms",
-        )
-        ax_i1.plot(
-            data["i1_no_delay"]["Voltage"],
-            data["i1_no_delay"]["Polarization"],
-            "m-",
-            label="No delay",
-        )
-        ax_i1.set_xlabel("Voltage (V)")
-        ax_i1.set_ylabel("Polarization (uC/cm^2)")
-        ax_i1.set_title("PV2 Loop from I1")
-        ax_i1.legend()
-        ax_i1.grid(alpha=0.3)
-        fig_i1.tight_layout()
-        i1_plot_path = Path(f"{fname_base}_i1.png")
-        fig_i1.savefig(i1_plot_path, dpi=300)
-        plt.close(fig_i1)
+
 
         print(f"Saved PV2 workbook: {workbook_path.resolve()}")
         print(f"Saved PV2 I2 loop: {i2_plot_path.resolve()}")
-        print(f"Saved PV2 I1 loop: {i1_plot_path.resolve()}")
         print("PV2 complete.")
     result = {"output_path": workbook_path}
     result.update(params=dict(parameters), accepted_current_ranges={key: parameters[key] for key in ("Irange1", "Irange2")})

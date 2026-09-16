@@ -32,7 +32,7 @@ for path in (SRC_ROOT, REPO_ROOT):
 from keithley4200.parameter_defaults import remember_current_ranges
 
 
-from keithley4200.output import reserve_summary_stem
+from keithley4200.output import reserve_summary_stem, save_summary_workbook
 
 # =============================================================================
 # USER CONFIGURATION
@@ -303,13 +303,6 @@ def validate_package_config(modules):
     }
 
 
-def snapshot_files(directory):
-    directory = Path(directory)
-    if not directory.exists():
-        return set()
-    return {path.resolve() for path in directory.rglob("*") if path.is_file() and ".reservations" not in path.parts}
-
-
 def run_pv_and_pund_stage(module, stage_name):
     save_root = SAVE_DIRS[stage_name]
     for run_index in range(1, int(PV_AND_PUND_REPEAT_COUNT) + 1):
@@ -379,16 +372,6 @@ def run_iv_stage(module):
                 time.sleep(float(SEGMENTED_IV["settle_time_s"]))
 
 
-def _stage_output_root(stage_name):
-    return SAVE_DIRS[stage_name]
-
-
-def save_package_summary(rows, live_path):
-    BASE_SAVE_DIR.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_csv(live_path, index=False)
-    return live_path
-
-
 def run_package():
     """Run enabled stages and preserve a live package-level audit trail."""
     modules = load_test_modules()
@@ -406,11 +389,9 @@ def run_package():
     )
 
     summary_stem, run_time = reserve_summary_stem(BASE_SAVE_DIR, "package_summary")
-    live_path = Path(f"{summary_stem}_live.csv")
+    summary_path = Path(f"{summary_stem}.xlsx")
     rows = []
     for stage_number, stage_name in enumerate(RUN_ORDER, start=1):
-        root = _stage_output_root(stage_name)
-        before = snapshot_files(root)
         started = datetime.now()
         status = "ok"
         error_text = ""
@@ -430,7 +411,6 @@ def run_package():
             error_text = traceback.format_exc()
             print(error_text)
         ended = datetime.now()
-        after = snapshot_files(root)
         rows.append(
             {
                 "time": run_time,
@@ -440,17 +420,15 @@ def run_package():
                 "start_time": started,
                 "end_time": ended,
                 "duration_s": (ended - started).total_seconds(),
-                "output_root": str(root.resolve()),
-                "new_files": " | ".join(str(path) for path in sorted(after - before)),
                 "error": error_text,
             }
         )
-        save_package_summary(rows, live_path)
+        save_summary_workbook(rows, summary_path)
 
         if status != "ok" and (STOP_ON_ERROR or status == "interrupted"):
             raise RuntimeError(
                 f"Package stopped after {stage_name}: {status}. "
-                f"See {live_path}"
+                f"See {summary_path}"
             )
         if (
             status == "ok"
@@ -459,9 +437,8 @@ def run_package():
         ):
             time.sleep(float(STAGE_SETTLE_TIME_S))
 
-    final_path = Path(f"{summary_stem}.xlsx")
-    pd.DataFrame(rows).to_excel(final_path, index=False)
-    print(f"FTJ package complete. Summary: {final_path.resolve()}")
+    save_summary_workbook(rows, summary_path)
+    print(f"FTJ package complete. Summary: {summary_path.resolve()}")
     return pd.DataFrame(rows)
 
 

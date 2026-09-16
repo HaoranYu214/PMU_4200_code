@@ -17,7 +17,7 @@ for path in (SRC_ROOT, REPO_ROOT):
         sys.path.insert(0, str(path))
 
 from keithley4200.tools.waveform_preview import preview_sequence_configs
-from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at
+from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at, voltage_tag
 from keithley4200.pmu.data_processing import read_both_channels
 from keithley4200.pmu.pmu_tests import (
     MAX_SEGMENTS_PER_SEQUENCE,
@@ -452,7 +452,10 @@ def run_test(
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, parameters["vp"], "tw" + time_tag(parameters["write_dwell"])),
+            save_dir, measurement_name(file_stem, None,
+                "Vp" + voltage_tag(float(parameters["offset_v"]) + abs(float(parameters["vp"]))),
+                "Vn" + voltage_tag(float(parameters["offset_v"]) - abs(float(parameters["vp"]))),
+                "tw" + time_tag(parameters["write_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {

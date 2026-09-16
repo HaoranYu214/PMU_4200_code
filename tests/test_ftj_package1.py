@@ -130,6 +130,8 @@ class FtjPackage1Tests(unittest.TestCase):
             + ["pair"],
         )
         self.assertEqual(result["stage"].tolist(), package.RUN_ORDER)
+        self.assertNotIn("output_root", result.columns)
+        self.assertNotIn("new_files", result.columns)
         self.assertTrue((result["status"] == "ok").all())
         last_iv = package.IV_TESTS[-1]
         self.assertEqual(
@@ -139,7 +141,7 @@ class FtjPackage1Tests(unittest.TestCase):
         self.assertIsNone(iv.PARAMS["timeout_s"])
         self.assertEqual(
             iv.SAVE_DIR,
-            Path(result.loc[result["stage"] == "segmented_iv", "output_root"].iloc[0]) / last_iv["name"],
+            package.SAVE_DIRS["segmented_iv"] / last_iv["name"],
         )
 
     def test_preview_generates_waveforms_without_opening_sessions(self):

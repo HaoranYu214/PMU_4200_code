@@ -38,8 +38,8 @@ params = dict(
     # area_cm2=1.2567e-5,
     # area_cm2=(10*1e-4)**2*3.14,
     area_cm2=(20*1e-4)**2,
-    Irange1=1e-5,
-    Irange2=1e-6,
+    Irange1=1e-05,
+    Irange2=1e-05,
 )
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
@@ -500,18 +500,7 @@ def run_test(
         fig_i2.savefig(f"{fname_base}_loop_i2diff.png", dpi=300)
         plt.close(fig_i2)
 
-        fig_i1, ax_i1 = plt.subplots(figsize=(7, 5))
-        for seg in ["P-U", "N-D"]:
-            sub = data["pund_diff"][data["pund_diff"]["Segment"] == seg]
-            ax_i1.plot(sub["Voltage"], sub["PolarizationI1"], ".", label=seg, markersize=4)
-        ax_i1.set_xlabel("Voltage (V)")
-        ax_i1.set_ylabel("Polarization (uC/cm^2)")
-        ax_i1.set_title("PUND Polarization from I1 Difference")
-        ax_i1.legend()
-        ax_i1.grid(alpha=0.3)
-        fig_i1.tight_layout()
-        fig_i1.savefig(f"{fname_base}_i1.png", dpi=300)
-        plt.close(fig_i1)
+
 
         fig_iv, ax_iv = plt.subplots(figsize=(7, 5))
         for seg in ["P-U", "N-D"]:

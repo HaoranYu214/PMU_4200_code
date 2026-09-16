@@ -338,17 +338,15 @@ def run_test(
         for label, frame in data.items():
             if isinstance(frame, pd.DataFrame):
                 frame.to_excel(writer, sheet_name=label[:31], index=False)
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    for axis, channel in zip(axes, ("i1", "i2")):
-        for suffix in ("delay", "no_delay"):
-            frame = data[channel+"_"+suffix]
-            axis.plot(frame["Voltage"], frame["Polarization"], label=suffix)
-        axis.set_title(channel.upper())
-    for axis in axes:
-        axis.set_xlabel("Voltage (V)")
-        axis.set_ylabel("Polarization (uC/cm^2)")
-        axis.legend()
-        axis.grid(alpha=0.3)
+    fig, axis = plt.subplots(figsize=(6, 4))
+    for suffix in ("delay", "no_delay"):
+        frame = data["i2_" + suffix]
+        axis.plot(frame["Voltage"], frame["Polarization"], label=suffix)
+    axis.set_title("I2")
+    axis.set_xlabel("Voltage (V)")
+    axis.set_ylabel("Polarization (uC/cm^2)")
+    axis.legend()
+    axis.grid(alpha=0.3)
     fig.tight_layout()
     fig.savefig(f"{fname_base}_loops.png", dpi=200)
     plt.close(fig)

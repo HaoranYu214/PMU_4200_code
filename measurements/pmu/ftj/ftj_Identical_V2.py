@@ -16,38 +16,40 @@ for path in (SRC_ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at
-from keithley4200.pmu.data_processing import merge_channels, read_both_channels
+from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at, voltage_tag
+from keithley4200.pmu.data_processing import read_both_channels
 from keithley4200.pmu.pmu_tests import (
     execute_segARB_test,
     power_off_outputs,
     validate_segment_arb_configs,
 )
 from keithley4200.pmu.session import PMUSession
+# These KXCI error commands apply to all cards, including PMU (manual 4-2/4-3).
+from keithley4200.smu.common import clear_kxci_error, raise_for_kxci_error
 from keithley4200.measurement_parameters import merge_parameters, remap_channel_options
 from keithley4200.tools.waveform_preview import preview_sequence_configs
 
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\FTJ\Identical_V2")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\14-09-2026\04A1_2700_1200_300\L30_2\FTJ\Identical_V2")
 FILE_STEM = "Identical2"
 
-CURRENT_RANGES = {CH1: 1e-4, CH2: 1e-4}
+CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
-    "ENABLE_LOAD_CONFIG": False,
-    "LOAD_RESISTANCE": 1.0,
+    "ENABLE_LOAD_CONFIG": True,
+    "LOAD_RESISTANCE": 1e6,
     "ENABLE_LLEC": False,
 }
 
 params = {
     # Voltage held before/after every write and read pulse.
     "base_v": 0.0,
-    "write_positive_v": 1.5,
-    "write_negative_v": -8,
-    "read_v": -1,
-    "write_positive_dwell": 1e-4,
+    "write_positive_v": 6,
+    "write_negative_v": -6,
+    "read_v": -2,
+    "write_positive_dwell": 5e-5,
     "write_negative_dwell": 5e-5,
     "read_dwell": 5e-5,
     "write_positive_trf": 1e-6,
@@ -59,12 +61,12 @@ params = {
     "wait_after_positive_write_s": 1.0,
     "wait_after_read_s": 1.0,
     "wait_after_negative_write_s": 1.0,
-    "positive_repeat_count": 40,
-    "negative_repeat_count": 40,
+    "positive_repeat_count": 100,
+    "negative_repeat_count": 100,
     "plan_repeat_count": 3,
 }
 
-PREVIEW_ONLY = True
+PREVIEW_ONLY = False
 WRITE_POSITIVE_SEQ_ID = 1
 READ_SEQ_ID = 2
 WRITE_NEGATIVE_SEQ_ID = 3
@@ -206,18 +208,54 @@ def run_single_test(query, test, *, channels=None, current_ranges=None, segarb_o
     current_ranges = dict(current_ranges) if current_ranges is not None else dict(zip(channels, (CURRENT_RANGES[CH1], CURRENT_RANGES[CH2])))
     segarb_options = remap_channel_options(SEGARB_OPTIONS, (CH1, CH2), channels, segarb_options)
 
-    execute_segARB_test(
-        query,
-        channels=[ch1, ch2],
-        seq_configs=test["seq_configs"],
-        seq_list={channel: [(config[0], 1) for config in configs]
-                  for channel, configs in test["seq_configs"].items()},
-        current_ranges=current_ranges,
-        options=segarb_options,
-    )
-    df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
-    power_off_outputs(query, (ch1, ch2))
-    return df_ch1, df_ch2
+    clear_kxci_error(query)
+
+    def checked_query(command):
+        # Idle status is also returned when EXECUTE never started (7-32).
+        # Check configuration before starting, then catch final verification errors.
+        if command == ":PMU:EXECUTE":
+            raise_for_kxci_error(query, context=f"{test['name']} configuration")
+        response = query(command)
+        if command == ":PMU:EXECUTE":
+            raise_for_kxci_error(query, context=f"{test['name']} EXECUTE")
+        return response
+
+    try:
+        execute_segARB_test(
+            checked_query,
+            channels=[ch1, ch2],
+            seq_configs=test["seq_configs"],
+            seq_list={channel: [(config[0], 1) for config in configs]
+                      for channel, configs in test["seq_configs"].items()},
+            current_ranges=current_ranges,
+            options=segarb_options,
+        )
+        raise_for_kxci_error(query, context=f"{test['name']} completion")
+        df_ch1, df_ch2 = read_both_channels(query, ch1, ch2)
+        raise_for_kxci_error(query, context=f"{test['name']} data readout")
+        return df_ch1, df_ch2
+    finally:
+        power_off_outputs(query, (ch1, ch2))
+
+
+
+def save_checkpoint(path, rows, frames, params_df):
+    """Replace one workbook only after its updated checkpoint is fully written."""
+    import os
+    import tempfile
+
+    handle, temporary = tempfile.mkstemp(prefix=f".{path.stem}_", suffix=".xlsx", dir=path.parent)
+    os.close(handle)
+    try:
+        combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        with pd.ExcelWriter(temporary, engine="openpyxl") as writer:
+            pd.DataFrame(rows).to_excel(writer, sheet_name="Summary", index=False)
+            combined.to_excel(writer, sheet_name="RawCombined", index=False)
+            params_df.to_excel(writer, sheet_name="Parameters", index=False)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def run_test(
@@ -249,39 +287,14 @@ def run_test(
     summary_rows = []
     combined_frames = []
 
-    with PMUSession(inst, channels=(ch1, ch2)) as session:
-        query = session.query
-        for index, test in enumerate(waveform['test_plan'], start=1):
-            print(f"Running {test['name']} ({index}/{len(waveform['test_plan'])}) ...")
-            df_ch1, df_ch2 = run_single_test(query, test, channels=channels, current_ranges=current_ranges, segarb_options=segarb_options)
-            merged_df = merge_channels({ch1: df_ch1, ch2: df_ch2})
-            if merged_df is not None and not merged_df.empty:
-                merged_df.insert(0, "test_name", test["name"])
-                merged_df.insert(1, "test_index", index)
-                merged_df.insert(2, "wait_after_s", test["wait_after_s"])
-                combined_frames.append(merged_df)
-            summary_rows.append(
-                {
-                    "test_index": index,
-                    "test_name": test["name"],
-                    f"points_ch{ch1}": 0 if df_ch1 is None else len(df_ch1),
-                    f"points_ch{ch2}": 0 if df_ch2 is None else len(df_ch2),
-                    "wait_after_s": test["wait_after_s"],
-                }
-            )
-            if test["wait_after_s"] > 0:
-                time.sleep(test["wait_after_s"])
-
-    summary_df = pd.DataFrame(summary_rows)
-    combined_df = (
-        pd.concat(combined_frames, ignore_index=True)
-        if combined_frames else pd.DataFrame()
-    )
     output_path = None
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, parameters["write_positive_v"], "tw" + time_tag(parameters["write_positive_dwell"])),
+            save_dir, measurement_name(file_stem, None,
+                "Vp" + voltage_tag(parameters["write_positive_v"]),
+                "Vn" + voltage_tag(parameters["write_negative_v"]),
+                "tw" + time_tag(parameters["write_positive_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {
@@ -295,10 +308,64 @@ def run_test(
         params_df = pd.DataFrame(
             {"name": saved_params.keys(), "value": map(repr, saved_params.values())}
         )
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            summary_df.to_excel(writer, sheet_name="Summary", index=False)
-            combined_df.to_excel(writer, sheet_name="RawCombined", index=False)
-            params_df.to_excel(writer, sheet_name="Parameters", index=False)
+
+    index = 0
+    test = {"name": "session"}
+    try:
+        with PMUSession(inst, channels=(ch1, ch2)) as session:
+            query = session.query
+            for index, test in enumerate(waveform['test_plan'], start=1):
+                print(f"Running {test['name']} ({index}/{len(waveform['test_plan'])}) ...")
+                df_ch1, df_ch2 = run_single_test(query, test, channels=channels, current_ranges=current_ranges, segarb_options=segarb_options)
+                merged_df = pd.concat(
+                    [frame.reset_index(drop=True) for frame in (df_ch1, df_ch2)
+                     if frame is not None], axis=1) if any(
+                         frame is not None for frame in (df_ch1, df_ch2)) else pd.DataFrame()
+                if merged_df is not None and not merged_df.empty:
+                    merged_df.insert(0, "test_name", test["name"])
+                    merged_df.insert(1, "test_index", index)
+                    merged_df.insert(2, "wait_after_s", test["wait_after_s"])
+                    combined_frames.append(merged_df)
+                summary_rows.append(
+                    {
+                        "test_index": index,
+                        "test_name": test["name"],
+                        f"points_ch{ch1}": 0 if df_ch1 is None else len(df_ch1),
+                        f"points_ch{ch2}": 0 if df_ch2 is None else len(df_ch2),
+                        "wait_after_s": test["wait_after_s"],
+                        "status": "ok",
+                        "error": "",
+                    }
+                )
+                if test["name"] == "read" and any(
+                        frame is None or frame.empty for frame in (df_ch1, df_ch2)):
+                    raise RuntimeError(
+                        f"Read step {index} returned no data on one or both channels. "
+                        "Stopping before further write pulses; inspect the instrument errors and command log.")
+                if save_results:
+                    save_checkpoint(output_path, summary_rows, combined_frames, params_df)
+                if test["wait_after_s"] > 0:
+                    time.sleep(test["wait_after_s"])
+
+    except BaseException as exc:
+        if summary_rows and summary_rows[-1]["test_index"] == index:
+            summary_rows[-1].update(status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed", error=str(exc))
+        else:
+            summary_rows.append(dict(test_index=index,
+                                     test_name=test["name"],
+                                     status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
+                                     error=str(exc)))
+        raise
+    finally:
+        if save_results:
+            save_checkpoint(output_path, summary_rows, combined_frames, params_df)
+            print(f"Saved Identical V2 checkpoint: {output_path}")
+
+    summary_df = pd.DataFrame(summary_rows)
+    combined_df = (
+        pd.concat(combined_frames, ignore_index=True)
+        if combined_frames else pd.DataFrame()
+    )
     result = {
         "summary_df": summary_df,
         "combined_df": combined_df,

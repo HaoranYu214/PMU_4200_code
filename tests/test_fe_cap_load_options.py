@@ -117,7 +117,10 @@ class FeCapEntryWiringTests(unittest.TestCase):
                     keywords = {keyword.arg for keyword in call.keywords}
                     self.assertIn("options", keywords)
 
-                self.assertIn("segarb_options.items()", source.lower())
+                if path.name == "endurance.py":
+                    self.assertIn('"SEGARB_OPTIONS": segarb_options', source)
+                else:
+                    self.assertIn("segarb_options.items()", source.lower())
 
     def test_map_exposes_complete_params_and_propagates_common_options(self):
         path = WORKFLOW_ROOT / "pv2_pund_map.py"

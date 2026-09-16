@@ -320,7 +320,6 @@ def main():
                 frame.insert(1, "Vd_read_V", float(vd))
                 frame.insert(2, "RequestedDelay_s", delay)
                 frame.insert(3, "SweepRunIndex", run_index)
-                frame["SourceWorkbook"] = Path(result_path).name
                 rows.append(frame)
 
             # Additional repeated FeFET-like data set for this Vg/Vd pair.
@@ -346,7 +345,6 @@ def main():
             repeated.insert(0, "Vg_read_V", float(vg))
             repeated.insert(1, "Vd_read_V", float(vd))
             repeated.insert(2, "RepeatDelay_t_s", float(FEFET_REPEAT_T))
-            repeated["SourceWorkbook"] = Path(repeated_path).name
             repeated_rows.append(repeated)
             repeat_plot = Path(repeated_path).parent / "Ids_vs_repeat.png"
             try:

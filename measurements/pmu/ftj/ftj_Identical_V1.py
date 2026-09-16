@@ -33,7 +33,7 @@ for path in (SRC_ROOT, REPO_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at
+from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at, voltage_tag
 from keithley4200.pmu.data_processing import read_both_channels
 from keithley4200.tools.waveform_preview import preview_sequence_configs
 from keithley4200.pmu.pmu_tests import (
@@ -47,11 +47,11 @@ from keithley4200.measurement_parameters import merge_parameters, remap_channel_
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\02-09-2026\03B4_2700_800_100\L30_1\FTJ\Identical")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\14-09-2026\04A1_2700_1200_300\L30_2\FTJ\Identical")
 # SAVE_DIR = Path(r"D:\Code\data\20260620")
 FILE_STEM = "Identical1"
 
-CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
+CURRENT_RANGES = {CH1: 1e-6, CH2: 1e-6}
 SEGARB_OPTIONS = {
     "ENABLE_CONNECTION_COMP": False,
     "ENABLE_LOAD_CONFIG": False,
@@ -60,15 +60,15 @@ SEGARB_OPTIONS = {
 }
 
 # PREVIEW_ONLY = True
-PREVIEW_ONLY = False
+PREVIEW_ONLY = True
 SAVE_WAVEFORM_PREVIEW = False
 
 params = {
     # Voltage held before/after every write and read pulse.
     "base_v": 0.0,
-    "write_positive_v": 5,
-    "write_negative_v": -5,
-    "read_v": -1,
+    "write_positive_v": 6,
+    "write_negative_v": -6,
+    "read_v": -1.5,
     "write_positive_dwell": 5e-5,
     "write_negative_dwell": 5e-5,
     "read_dwell": 5e-5,
@@ -78,9 +78,9 @@ params = {
     "write_positive_idle": 1e-2,
     "write_negative_idle": 1e-2,
     "read_idle": 1e-2,
-    "positive_repeat_count": 50,
-    "negative_repeat_count": 50,
-    "sequence_cycle_count": 2,
+    "positive_repeat_count": 100,
+    "negative_repeat_count": 100,
+    "sequence_cycle_count": 1,
 }
 
 
@@ -411,7 +411,10 @@ def run_test(
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, parameters["write_positive_v"], "tw" + time_tag(parameters["write_positive_dwell"])),
+            save_dir, measurement_name(file_stem, None,
+                "Vp" + voltage_tag(parameters["write_positive_v"]),
+                "Vn" + voltage_tag(parameters["write_negative_v"]),
+                "tw" + time_tag(parameters["write_positive_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {

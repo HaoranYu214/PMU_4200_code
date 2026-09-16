@@ -466,17 +466,15 @@ def run_test(
         for label, frame in data.items():
             if isinstance(frame, pd.DataFrame):
                 frame.to_excel(writer, sheet_name=label[:31], index=False)
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    for axis, key in zip(axes, ("PolarizationI1", "Polarization")):
-        for label in ("P-U", "N-D"):
-            frame = data["pund_diff"].query("Segment == @label")
-            axis.plot(frame["Voltage"], frame[key], label=label)
-        axis.set_title(key)
-    for axis in axes:
-        axis.set_xlabel("Voltage (V)")
-        axis.set_ylabel("Polarization (uC/cm^2)")
-        axis.legend()
-        axis.grid(alpha=0.3)
+    fig, axis = plt.subplots(figsize=(6, 4))
+    for label in ("P-U", "N-D"):
+        frame = data["pund_diff"].query("Segment == @label")
+        axis.plot(frame["Voltage"], frame["Polarization"], label=label)
+    axis.set_title("PUND from I2")
+    axis.set_xlabel("Voltage (V)")
+    axis.set_ylabel("Polarization (uC/cm^2)")
+    axis.legend()
+    axis.grid(alpha=0.3)
     fig.tight_layout()
     fig.savefig(f"{fname_base}_loops.png", dpi=200)
     plt.close(fig)

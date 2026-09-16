@@ -17,7 +17,7 @@ for path in (SRC_ROOT, REPO_ROOT):
         sys.path.insert(0, str(path))
 
 from keithley4200.tools.waveform_preview import preview_sequence_configs
-from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at
+from keithley4200.output import measurement_name, reserve_output_stem, time_tag, saved_at, voltage_tag
 from keithley4200.pmu.data_processing import read_both_channels
 from keithley4200.pmu.pmu_tests import (
     MAX_SEGMENTS_PER_SEQUENCE,
@@ -30,7 +30,7 @@ from keithley4200.measurement_parameters import merge_parameters, remap_channel_
 
 INST = "TCPIP0::129.125.87.80::1225::SOCKET"
 CH1, CH2 = 1, 2
-SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\02-09-2026\03B4_2700_800_100\L30_1\FTJ\RV1")
+SAVE_DIR = Path(r"C:\Users\P317151\Documents\data\14-09-2026\04A1_2700_1200_300\L30_2\FTJ\RV1")
 FILE_STEM = "RV1"
 
 CURRENT_RANGES = {CH1: 1e-5, CH2: 1e-5}
@@ -49,10 +49,10 @@ params = {
     # write-window offset so shifting the scan does not apply a DC idle bias.
     "base_v": 0.0,
     "offset_v": 0,
-    "vp": 8,
+    "vp": 6,
     "write_level_step": 0.2,
     "read_v": -2,
-    "prepost_dwell": 1e-3,
+    "prepost_dwell": 1e-2,
     "write_dwell": 5e-5,
     "read_dwell": 5e-5,
     "prepost_rise": 1e-5,
@@ -442,7 +442,10 @@ def run_test(
     if save_results:
         save_dir.mkdir(parents=True, exist_ok=True)
         output_stem = reserve_output_stem(
-            save_dir, measurement_name(file_stem, parameters["vp"], "tw" + time_tag(parameters["write_dwell"])),
+            save_dir, measurement_name(file_stem, None,
+                "Vp" + voltage_tag(float(parameters["offset_v"]) + abs(float(parameters["vp"]))),
+                "Vn" + voltage_tag(float(parameters["offset_v"]) - abs(float(parameters["vp"]))),
+                "tw" + time_tag(parameters["write_dwell"])),
         )
         output_path = Path(f"{output_stem}.xlsx")
         saved_params = {

@@ -294,18 +294,12 @@ def run_nls_switch_test(
             index=False,
         )
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    axes[0].plot(df_vp_ch1["Voltage"], df_vp_ch1["Polarization"], "b-", linewidth=1)
-    axes[0].set_xlabel("Voltage (V)")
-    axes[0].set_ylabel("Polarization (uC/cm^2)")
-    axes[0].set_title("CH1 V-P (Tri1 - Tri2)")
-    axes[0].grid(alpha=0.3)
-
-    axes[1].plot(df_vp_ch2["Voltage"], df_vp_ch2["Polarization"], "r-", linewidth=1)
-    axes[1].set_xlabel("Voltage (V)")
-    axes[1].set_ylabel("Polarization (uC/cm^2)")
-    axes[1].set_title("CH2 V-P (Tri1 - Tri2)")
-    axes[1].grid(alpha=0.3)
+    fig, axis = plt.subplots(figsize=(6, 5))
+    axis.plot(df_vp_ch2["Voltage"], df_vp_ch2["Polarization"], "r-", linewidth=1)
+    axis.set_xlabel("Voltage (V)")
+    axis.set_ylabel("Polarization (uC/cm^2)")
+    axis.set_title("CH2 V-P (Tri1 - Tri2)")
+    axis.grid(alpha=0.3)
 
     fig.suptitle("NLS Switch - Differential Polarization", fontsize=14)
     fig.tight_layout()
